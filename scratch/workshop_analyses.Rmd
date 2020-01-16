@@ -1,0 +1,435 @@
+---
+title: "Examples of Workshop Analyses"
+author: "Korn Ferry Institute"
+date: 2020-01-15
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      out.width  = '1600px',
+                      out.height = '900px',
+                      dpi        = 200)
+```
+
+
+The purpose of this document is to demonstrate the types of analyses required
+for each of the "big data systems". The examples here will be specified using
+the tidyverse, but any of the big data systems should cover similar content.
+
+## Required Packages
+
+We first need to go over the packages that are required for the data system. For
+example, the "Tidyverse" contains the "tidyverse" package (which installs and
+loads the entire tidyverse system). Let's install the `tidyverse` and other
+packages required for this section.
+
+```{r}
+cur_pkgs  <- rownames(installed.packages())
+tidy_pkgs <- c("tidyverse",
+               "here",
+               "vctrs",
+               "fs",
+               "vroom")
+
+# determine packages that are missing
+miss_pkgs <- setdiff(x = tidy_pkgs,
+                     y = cur_pkgs)
+
+# installing missing packages
+if(length(miss_pkgs)){
+  install.packages(miss_pkgs,
+                   repos = "https://cran.rstudio.com/")
+}
+```
+
+Loading the tidyverse package provides two pieces of information:
+
+1. What "sub-packages" are part of the tidyverse system?
+2. What functions conflict with currently loaded functions?
+
+```{r}
+# load the tidyverse packages
+library(tidyverse)
+```
+
+We can see that the tidyverse contains the following packages:
+
+1. `tibble`: a reimagining of the data.frame. Tibbles are like data.frames but
+   they have a different method of display, have some tidyverse benefits (like
+   using `rlang`), and yell at you if you try to take a shortcut to doing anything.
+2. `forcats`: functions to work with factors.
+3. `stringr`: functions to work with string process (essentially wrappers of the
+   `stringi` package, which is an alternative to string processing functions
+   in base `R`).
+4. `readr`: functions to read data into `R` and turn that data into `tibble`s.
+5. `tidyr`: functions for putting data into forms useful for summarization/aggregation.
+6. `dplyr`: functions designed to summarize/aggregate/manipulate data.
+7. `purrr`: functions for "functional programming" (map, reduce, filter). These are
+   essentially (slow) alternatives to `sapply`, `vapply`, `lapply`, `mapply` functions.
+8 `ggplot2`: functions for graphing in an alternate system than base `R`.
+
+Note that the conflicts indicates that once you load the tidyverse, the `filter`
+from `dplyr` supercedes the `filter` from `stats`. If you want to use the `filter`
+from the `stats` package, you would then need to fully condition the function
+(e.g., use `stats::filter` as the function name rather than `filter`).
+
+You can load each of the `tidyverse` packages by itself rather than the whole
+group of packages at once, but you can think of the Tidyverse being a framework
+and `tidyverse` package loading all dependencies required with working in that
+framework.
+
+These are not the "only" packages in the tidyverse. There are tidyverse-dependent
+packages (`rlang`, `vctrs`, `magrittr`, `crayon`, `cli`, `pillar`, `glue`,
+`tidyselect`), tidyverse-imporing packages (`vroom`, `readxl`, `haven`, `jsonlite`,
+`xml2`, `httr`, `rvest`, `DBI`), tidyverse-manipulation packages (`lubridate`,
+`hms`, `blob`). There is a separate whole area for package development (Tidy
+Development, which includes `devtools` and everything that `devtools` depends
+on) and modeling (`tidymodels` and everything that `tidymodels` depends on,
+including `broom`, `infer`, `modelr`, `recipes`, `rsample`, and `yardstick`).
+Note that the `tidymodels` package has the same setup as the `tidyverse` package.
+
+You can see whether all of the dependent tidyverse packages are out of date:
+
+```{r}
+# check to see if any dependencies are out of date
+tidyverse::tidyverse_update(recursive = TRUE,
+                            repos     = "https://cran.rstudio.com/")
+```
+
+And see which packages count as part of the `tidyverse`
+
+```{r}
+tidyverse::tidyverse_packages(include_self = FALSE)
+```
+
+## Loading Data
+
+If your data is in ".csv" format, there are two packages to load your data into
+`R` using the `tidyverse`: `readr` and `vroom`. If you are in an "R Project" in
+RStudio, the `here` package of the `tidyverse` will indicate the upper-most
+directory of the project, and the `fs` package of the `tidyverse` can create
+file paths.
+
+```{r}
+# pull project directory
+project_dir <- here::here()
+
+# combine file names to pull paths
+data_files  <- vctrs::vec_c(
+   demos  = "demos_to_merge",
+   scores = "scores_to_merge",
+   comb   = "data_to_rowbind"
+)
+
+# bind directory with file names to create file paths
+data_paths  <- rlang::set_names(
+   x  = fs::path(project_dir, "data", data_files, ext = "csv"),
+   nm = names(data_files)
+)
+
+# can check to make sure the files exist before reading them in
+print(fs::file_exists(data_paths))
+```
+
+You can use `read_csv` from the `readr` package or `vroom` from the `vroom`
+package to read the files into `R`.
+
+```{r}
+# method one of reading files
+tidy_data_1 <- map(.x = data_paths,
+                   .f = read_csv)
+
+# this is equilvalent to:
+# tidy_data_1 <- list(
+#   demos  = read_csv(data_files[1]),
+#   scores = read_csv(data_files[2]),
+#   comb   = read_csv(data_files[3])
+# )
+```
+
+Note that packages in the tidyverse tend to be chatty. If you don't specify
+something (and it has to make a guess), it will probably tell you what it
+guessed. Here you can specify the column types directly using the `col_types`
+argument. If you don't specify them, `read_csv` will try to guess whether they're
+double (`col_double`), character (`col_character`), logical (`col_logical`) or
+something else. Moreover, `read_csv` will **never** convert character strings
+to factors unless you specify this manually and will **always** convert the
+data into a `tibble`.
+
+```{r}
+print(tidy_data_1[[1]])
+```
+
+Notice also that `read_csv` converted row names to an `X1` column in the data,
+changed any `X1` column to something else (namely `X1_1`). There is no easy way
+to change this behavior (without specifying all of the columns to read in), but
+we can certainly fix it!
+
+```{r}
+# a function to remove the first column and rename any X1_1 column as X1
+remove_rowname_column <- function(tbl){
+   tbl <- tbl %>%
+          select(-1)
+   
+   # there are better ways of doing this that are more general
+   if("X1_1" %in% names(tbl)){
+      tbl <- tbl %>%
+             rename(X1 = X1_1)
+   }
+   
+   tbl
+}
+
+# removing the rownames column
+tidy_data_1 <- map(.x = tidy_data_1,
+                   .f = remove_rowname_column)
+```
+
+Note that we can also read in the data using the `vroom` function. This function
+is similar to `read_csv` but faster (and has additional storage capabilities
+in `R`). Notice that `vroom::vroom` has an argument, `col_select`, that allows
+us to drop the first column of the data (the column indicating the rowname)
+without applying the earlier function.
+
+```{r}
+# method two of reading files
+tidy_data_2 <- map(.x = data_paths,
+                   .f = vroom::vroom,
+                   col_select = -1)
+
+# this is equilvalent to:
+# tidy_data_2 <- list(
+#   demos  = vroom::vroom(data_files[1], col_select = -1),
+#   scores = vroom::vroom(data_files[2], col_select = -1),
+#   comb   = vroom::vroom(data_files[3], col_select = -1)
+# )
+```
+
+Note that the data looks the same as it did before.
+
+```{r}
+print(tidy_data_2[[1]])
+```
+
+Let's save these datasets as separate objects in `R` to be used for further
+analysis.
+
+```{r}
+tidy_demos  <- pluck(tidy_data_1, "demos")
+tidy_scores <- pluck(tidy_data_1, "scores")
+tidy_comb_1 <- pluck(tidy_data_1, "comb")
+```
+
+Note that we have three sets of data.
+
+1. `tidy_demos` are demographic data for some of the unique IDs in `tidy_scores`.
+
+```{r}
+print(tidy_demos)
+```
+
+2. `tidy_scores` are scores on each of the variables for IDs in `tidy_demos`.
+
+```{r}
+print(tidy_scores)
+```
+
+3. `tidy_comb_1` are combination of data (demos and scores combined) for IDs not
+   in `tidy_demos` or `tidy_scores`.
+   
+```{r}
+print(tidy_comb_1)
+```
+
+## Merging Data
+
+The Tidyverse package `dplyr` contains several functions to merge two tibbles.
+Unlike base-R, which has one function to do all of the joining, the Tidyverse
+tries to make individual functions for specific goals (with each function
+having a different, descriptive name).
+
+1. `inner_join`: keep rows of `x` and rows of `y` that have the same elements
+   of the `by` variable. Named after the SQL join "INNER JOIN" or "JOIN".
+2. `left_join`: keep all rows of `x` and ONLY rows of `y` that have `by` elements
+   in `x`. Named after the SQL join "LEFT JOIN" or "LEFT OUTER JOIN".
+3. `right_join`: keep all rows of `y` and ONLY rows of `x` that have `by` elements
+   in `y`. Named after the SQL join "RIGHT JOIN" or "RIGHT OUTER JOIN".
+4. `full_join`: keep all rows of `x` and all rows of `y`. Named after the SQL
+   join "FULL JOIN" or "FULL OUTER JOIN".
+5. `semi_join`: keep rows of `x` that have `by` elements in `y`. Named after
+   the SQL join "LEFT SEMI JOIN".
+6. `anti_join`: keep rows of `x` that do not have `by` elements in `y`. Named
+   after the SQL join "LEFT ANTI JOIN".
+7. `nest_join`: keep all rows of `x` and put rows of `y` that have a
+   particular `by` element as an element of a "tibble" column.
+   
+To see how these work, let's remove some rows from `tidy_demos` and `tidy_scores`.
+Lets sort the rows ahead of time so that the joins return data in the same order.
+Note that merging in the Tidyverse doesn't automatically sort the rows unlike
+base R functions.
+
+```{r}
+# sort dfs by guid
+tidy_demos    <- tidy_demos %>%
+                 arrange(guid)
+tidy_scores   <- tidy_scores %>%
+                 arrange(guid)
+
+# remove a few odd rows from tidy_demos and even rows from tidy_scores
+tidy_demos_1  <- tidy_demos %>%
+                 mutate(row_n = row_number()) %>%
+                 slice(-vctrs::vec_c(1, 3, 5)) %>%
+                 select(row_n, everything())
+
+tidy_scores_1 <- tidy_scores %>%
+                 mutate(row_n = row_number()) %>%
+                 slice(-vctrs::vec_c(2, 4)) %>%
+                 select(row_n, everything())
+```
+
+Notice that the row variable is in order and can tell us what is going on. ALso
+note that we removed rows 1, 3, 5 from the demographics data and 2, 4 from the
+scores data.
+
+```{r}
+tidy_demos_1
+tidy_scores_1
+```
+
+What happens when we apply each of the standard join types?
+
+```{r}
+id_var <- vctrs::vec_c("row_n", "guid")
+inner_join(x  = tidy_demos_1,
+           y  = tidy_scores_1,
+           by = id_var) %>%
+   arrange(row_n)
+
+left_join(x  = tidy_demos_1,
+          y  = tidy_scores_1,
+          by = id_var) %>%
+   arrange(row_n)
+
+right_join(x  = tidy_demos_1,
+           y  = tidy_scores_1,
+           by = id_var) %>%
+   arrange(row_n)
+
+full_join(x  = tidy_demos_1,
+          y  = tidy_scores_1,
+          by = id_var) %>%
+   arrange(row_n)
+```
+
+Note that the `inner_join` kept only `row` that was in both tables (6, ...),
+`left_join` kept `row` that was in the first table but not the second (2, 4, 6, ...),
+`right_join` kept `row` that was in the second table but not the first (1, 3, 5, 6, ...),
+and `full_join` kept all rows. In all cases, all of the variables were kept and
+data missing data (missing rows) for all variables were set to `NA`.
+
+Filtering joins (`semi_join` and `anti_join`) are a quick way of keeping rows
+in the data by using "join" terminlogy rather than filtering data directly.
+
+```{r}
+# keep all tidy_demos_1 rows with equivalents in tidy_scores_1
+out <- semi_join(x  = tidy_demos_1,
+                 y  = tidy_scores_1,
+                 by = id_var)
+out
+names(out)
+
+# keep all tidy_demos_1 rows without equivalents in tidy_scores_1
+out <- anti_join(x  = tidy_demos_1,
+                 y  = tidy_scores_1,
+                 by = id_var)
+out
+names(out)
+```
+
+Note that `semi_join` was similar to `inner_join` but kept ONLY rows matching
+rows in `y`. Nested joins are more complicated and beyond the scope of this
+demostration.
+
+Using the original data, because the rows are the same, using any of the combining
+joins will return the same data. If that's the case, the fastest should be the
+`inner_join`.
+
+```{r}
+id_var      <- "guid"
+tidy_comb_2 <- inner_join(x  = tidy_demos,
+                          y  = tidy_scores,
+                          by = id_var)
+```
+
+Finally, we have additional data (`tidy_comb_1`) that we want to combine with the
+merged data. We can bind everything together using `bind_rows`. The simplest way
+to use the function is in the same way that you use `rbind`.
+
+```{r}
+tidy_comb   <- bind_rows(tidy_comb_1,
+                         tidy_comb_2)
+tidy_comb
+```
+
+If your data is in a list format, the `bind_rows` function will also work.
+
+```{r}
+tidy_comb <- list(tidy_comb_1,
+                  tidy_comb_2) %>%
+             bind_rows()
+tidy_comb
+```
+
+If you add an `.id` argument to `bind_rows`, `bind_rows` will add an extra column
+to indicate whether the data came from.
+
+```{r}
+bind_rows(tidy_comb_1,
+          tidy_comb_2,
+          .id = "source")
+bind_rows(blah = tidy_comb_1,
+          blee = tidy_comb_2,
+          .id  = "source")
+```
+
+Unlike `rbind`, `bind_rows` will work if your data does not have the same columns
+and simply fill the missing places with `NA`.
+
+```{r}
+df_1 <- select(tidy_comb_1,
+               1, 3, 5) %>%
+        slice(1, 2)
+df_1
+df_2 <- select(tidy_comb_2,
+               1, 2, 4, 6, 7) %>%
+        slice(1, 2)
+df_2
+```
+What happens when we combine the data together?
+
+```{r}
+bind_rows(df_1,
+          df_2)
+```
+
+However, `dplyr` will not convert columns, so if one of your columns is a character
+string in one dataset and numeric in another, `bind_rows` will error.
+
+```{r}
+# change the type of data
+df_1 <- tidy_comb_1 %>%
+        mutate(X1 = vctrs::vec_cast(x  = X1,
+                                    to = "character"))
+df_2 <- tidy_comb_2
+
+# try to bind rows together
+safely(.f = bind_rows)(df_1, df_2)$error
+```
+
+## Reshaping Data
+
+## Aggregating Data
+
