@@ -32,7 +32,8 @@ tidy_pkgs <- c("tidyverse",
                "here",
                "vctrs",
                "fs",
-               "vroom")
+               "vroom",
+               "magrittr")
 
 # determine packages that are missing
 miss_pkgs <- setdiff(x = tidy_pkgs,
@@ -52,6 +53,7 @@ Loading the tidyverse package provides two pieces of information:
 
 ```{r}
 # load the tidyverse packages
+library(magrittr)
 library(tidyverse)
 ```
 
@@ -290,7 +292,7 @@ tidy_scores_1 <- tidy_scores %>%
                  select(row_n, everything())
 ```
 
-Notice that the row variable is in order and can tell us what is going on. ALso
+Notice that the row variable is in order and can tell us what is going on. Also
 note that we removed rows 1, 3, 5 from the demographics data and 2, 4 from the
 scores data.
 
@@ -430,6 +432,202 @@ safely(.f = bind_rows)(df_1, df_2)$error
 ```
 
 ## Reshaping Data
+
+Currently the data is in wide format with each item (`X1`-`X10`) a column of the
+data. Hadley Wickham defined Tidy data
+(e.g., "https://vita.had.co.nz/papers/tidy-data.pdf") as "Each variable forms
+a column; each observation forms a row; each type of observational unit forms
+a table" (Wickham, p. 4). Note that in the table, `guid`, `data_level`,
+`data_industry`, and `data_function` are clearly separate variables (so should
+form separate columns). One could argue that each of `X1`-`X10` are also separate
+variables (they are separate items or separate constructs). However they also
+might be a single item (`normed_score`) that aligns with a separate variable
+(`trait`). If we put the data in this format, it is called "long format".
+
+There are several functions for translating data from "wide" format to "long"
+format in `tidyr`. The legacy methods are `gather` (turn wide-data into long-data)
+and `spread` (turn long-data into wide-data):
+
+```{r}
+var_name       <- "trait"        # the category variable made from the columns
+val_name       <- "normed_score" # the numeric variable made from the values
+tidy_comb_long <- gather(tidy_comb,
+                         key   = !!var_name,
+                         value = !!val_name,
+                         matches("^X[0-9]+$"))
+tidy_comb_wide <- spread(tidy_comb_long,
+                         key    = !!var_name,
+                         value  = !!val_name)
+
+# check if we've reversed everything
+all_equal(target  = tidy_comb_wide,
+          current = tidy_comb)
+```
+
+Note that the rows and columns aren't necessarily in the same order, but we have
+reversed the operation.
+
+```{r}
+tidy_comb_long
+tidy_comb_wide
+```
+
+In this case, `gather` takes data in wide format and makes it in long format and
+`spread` takes data in long format and makes it in wide format. For both
+functions, the `key` argument is the variable in long format that matches the
+names of the variables in wide format, and `value` is the variable in long format
+that matches the variable values in wide format. An easy way to remember this is
+"key is the top of your data, and value indicates the entries". For `gather`,
+you also need to indicate which variables you want to turn into the "key" and
+"value" columns. Anything that you can do in `select`, you can do here:
+
+1. Select raw variable names
+
+```{r}
+gather(tidy_comb,
+       key   = !!var_name,
+       value = !!val_name,
+       X1, X2, X3, X4, X5, X6, X7, X8, X9, X10)
+```
+
+2. Remove raw variable names
+
+```{r}
+gather(tidy_comb,
+       key   = !!var_name,
+       value = !!val_name,
+       -guid, -data_level, -data_industry, -data_function)
+```
+
+3. Use `dplyr::select` helper functions: `matches` for pattern matching, 
+   `starts_with`, `ends_with`, `contains` for finding specific strings,
+   `num_range` for finding the actual range of values, `one_of` for character
+   vectors, etc.
+   
+Note also that for these functions `key` and `value` take raw variable names
+(either unquoted, such as trait or quoted such as "trait"). Because these
+functions take raw variable names, if you want to use a variable name saved
+in an object (such as `var_name <- "trait"`), you need to use "tidy unquoting
+methods". Essentially, this means putting two exclamation points in front of the
+variable. In other words, in the tidy framework, `!!x` means "use whatever is
+contained in the variable `x` and not the name `x` itself."
+   
+In current versions of `tidyr`, `spread` and `gather` are deprecated. The newer
+versions of those functions are called `pivot_wider` (matching `spread`) and
+`pivot_longer` (matching `gather`). We can accomplish the same results with
+these functions, but keep in mind that the application is a bit different.
+
+```{r}
+tidy_comb_long_2 <- pivot_longer(tidy_comb,
+                                 cols      = matches("^X[0-9]+$"),
+                                 names_to  = var_name,
+                                 values_to = val_name)
+tidy_comb_wide_2 <- pivot_wider(tidy_comb_long_2,
+                                names_from  = var_name,
+                                values_from = val_name)
+
+# check if we've reversed everything
+all_equal(target  = tidy_comb_wide_2,
+          current = tidy_comb_wide)
+all_equal(target  = tidy_comb_long_2,
+          current = tidy_comb_long)
+```
+
+Notice that they got rid of the weird quoting rules, so that `names_to` and
+`values_to` ONLY take quoted variable names. This prevents needing to use the
+odd "tidy escape syntax" in these functions. These functions can do much more
+complicated things than `gather` and `spread`. For instance, `pivot_longer` can
+
+1. Use a regular expression to remove text from the start of each variable name
+
+```{r}
+pivot_longer(tidy_comb,
+             cols      = matches("^X[0-9]+$"),
+             names_to  = var_name,
+             values_to = val_name,
+             
+             # remove the "X" in front of the variable names
+             names_prefix = "^X")
+```
+
+2. Break up the names of the columns into separate "variables"
+
+```{r}
+pivot_longer(tidy_comb,
+             cols      = matches("^X[0-9]+$"),
+             values_to = val_name,
+             
+             # put the "X" in front of the variable names into a separate variable
+             names_to  = c("prefix", var_name),
+             names_sep = 1)
+```
+
+3. Indicate prototypes for what the type of names/values in the final data.
+
+If you really want to be creative with how to transform your data, you can use
+`build_wider_spec` and `pivot_wider_spec` or `build_longer_spec` and
+`pivot_longer_spec`. This allows you to build a specification for how to transform
+your dataset.
+
+```{r}
+tidy_comb_spec <- build_longer_spec(tidy_comb,
+                                    cols      = matches("^X[0-9]+$"),
+                                    names_to  = var_name,
+                                    values_to = val_name)
+tidy_comb_spec
+```
+
+In this case, we have several columns:
+
+1. `.name`: the name of the variable that we are going to do something with.
+2. `.value`: for a given name, what variable does the corresponding value go
+   into?
+3. Additional columns: for a given name, what is the value in additional
+   columns.
+   
+Because this is a tibble, we can mutate, change, update, add things, and the
+final `pivot_longer_spec` will use the specification to determine what to do
+with the final columns.
+
+```{r}
+tidy_comb_spec <- tidy_comb_spec %>%
+                  separate(col  = "trait",
+                           into = vctrs::vec_c("prefix", "trait_number"),
+                           sep  = 1) %>%
+                  mutate(.value          = inset(.value,
+                                                 2,
+                                                 value = "whoops"),
+                         random_variable = letters[vctrs::vec_seq_along(prefix)])
+tidy_comb_spec
+```
+
+Now we can apply this specification and `X1` will have its "value" go into the
+variable "normed_score" with the values of "prefix" to be "X", "trait_number" to
+be 1, and "random_variable" to be "a". However, `X2` will have its value go
+into the variable "whoops" with the values of "prefix" to be "X", "trait_number"
+to be 2, and "random_variable" to be "b".
+
+```{r}
+pivot_longer_spec(data = tidy_comb,
+                  spec = tidy_comb_spec) %>%
+   select(-(guid:data_function))
+```
+
+So a specification is effectively "for the variable with this name, where does
+its value go, what other variables need to be created, and what are the values
+of those variables?" Note that `pivot_longer_spec` and `pivot_wider_spec` use
+the same specification.
+
+```{r}
+all_equal(target  = tidy_comb,
+          current = tidy_comb %>%
+                    pivot_longer_spec(tidy_comb_spec) %>%
+                    pivot_wider_spec(tidy_comb_spec,
+                                     values_fn = list(whoops = first)))
+```
+
+Technically, the `values_fn` shouldn't be needed there, but the function is
+giving me "list" columns for the "whoops" variable (which seems to be a bug).
 
 ## Aggregating Data
 
