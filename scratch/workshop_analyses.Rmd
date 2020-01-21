@@ -424,7 +424,7 @@ string in one dataset and numeric in another, `bind_rows` will error.
 # change the type of data
 df_1 <- tidy_comb_1 %>%
         mutate(X1 = vctrs::vec_cast(x  = X1,
-                                    to = "character"))
+                                    to = character()))
 df_2 <- tidy_comb_2
 
 # try to bind rows together
@@ -631,3 +631,116 @@ giving me "list" columns for the "whoops" variable (which seems to be a bug).
 
 ## Aggregating Data
 
+How you would approach aggregating data in the Tidyverse framework depends on
+whether your data is in long format or wide format. If your data is in long
+format, then it would be easiest to use the `group_by` `summarize` pattern
+directly. In this case `group_by` is the variables we want to split by and
+`summarize` is the stuff that we want to happen within each group.
+
+```{r}
+tidy_comb_long %>%
+   group_by(data_level, trait) %>%
+   summarize(mean_score = mean(normed_score),
+             sd_score   = sd(normed_score))
+```
+In this case, we want to find the mean of each trait within each management
+level. `group_by` takes variables outer to inner, and then variables included
+in the output are ONLY the variables in the `group_by` and the created variables
+in the `summarize`. Everything else is gone. If you look at the `trait` column
+above, the traits aren't in the right order. We have "X1" followed by "X10"
+followed by "X2". This is because `trait` is just a character string, and
+character strings are parsed by each place from the beginning to the end of
+the string. We can change "trait" to a factor with appropriate levels using
+`mutate` (update data) mixed with functions from `forcats` (factors) and
+`stringr` (string processing).
+
+```{r}
+# function to sort levels by integer buried in string
+pull_out_number <- function(x){
+   stringr::str_extract(string = x,
+                        pattern = "[0-9]+") %>%
+   vctrs::vec_cast(to = integer()) %>%
+   unique()
+}
+
+# updating levels of trait to be in right order
+tidy_comb_long <- 
+   tidy_comb_long %>%
+   mutate(
+     trait = forcats::as_factor(trait) %>%
+             forcats::fct_reorder(.f   = .,
+                                  .x   = .,
+                                  .fun = pull_out_number)
+   )
+
+# rerun
+tidy_comb_long %>%
+   group_by(data_level, trait) %>%
+   summarize(mean_score = mean(normed_score),
+             sd_score   = sd(normed_score))
+```
+Now the order is correct! Unfortunately your data is in long format, which
+might be OK for follow-up analyses but difficult to present or compare for 
+reporting purposes. If you want your data in wide format, you can either take
+your long results and reshape it to be in wide format or you can analyze the
+wide format data.
+
+You can analyze the wide format data the same way that you did before (using
+`group_by` followed by `summarize`)
+
+```{r}
+# repeat this for all 10 variables ... ugh
+tidy_comb_wide %>%
+   group_by(data_level) %>%
+   summarize(X1_mean = mean(X1),
+             X1_sd   = sd(X1),
+             X2_mean = mean(X2),
+             X2_sd   = sd(X2),
+             X3_mean = mean(X3),
+             X3_sd   = sd(X3))
+```
+However, `dplyr` has versions of `summarize` (as well as all of the other `dplyr`
+verbs: `arrange`, `group_by`, `mutate`, `transmute`, `select`, `rename`, `filter`)
+that work systematically on subsets of the data without you having to specify
+those subsets directly.
+
+1. `_all`: do this thing (apply this function, usually) to all columns that are
+   (typically, although not always) grouping columns.
+2. `_at`: do this thing (apply this function, usually) to all columns that are
+   specified by `.vars` and are (typically, although not always) grouping
+   columns.
+3. `_if`: do this thing (apply this function, usually) to all columns that are
+   true given some `.predicate` function and are (typically, although not always)
+   grouping columns.
+   
+Note that `.funs` can either be a single function or a list of (possibly-named)
+functions. If `.funs` is a list of length more than 1, each function will be
+applied to each column. `.vars` is similar to what was specified earlier in the
+reshaping section, but it generally needs to be surrounded by the `vars`
+function (for some reason). In our case, we want to take the mean and sd of
+every non-grouping column that matches "X" followed by a number.
+
+```{r}
+tidy_comb_wide %>%
+   group_by(data_level) %>%
+   summarize_at(.vars = vars(matches("^X[0-9]+$")),
+                .funs = list(mean = mean,
+                             sd   = sd))
+```
+Alternatively, if that syntax is kind of weird, you can do something similar
+without the call to `matches`. To remove the unneeded columns, put a "-" in
+front of the columns not to summarize.
+
+```{r}
+tidy_comb_wide %>%
+   group_by(data_level) %>%
+   summarize_at(.vars = vars(-c("guid", "data_industry", "data_function")),
+                .funs = list(mean = mean,
+                             sd   = sd))
+```
+You can also do more complicated grouping aggregations. For example, you can
+fit a linear model within each group to work out, for example, which trait best
+predicts engagement, and then use functions in `broom` and `tidyr` to quickly
+display your output per group. `tibble`s are flexible because they allow for
+reasonable display of variables that are "lists" and not simple atomic vectors
+(which is a typical assumption when starting out learning `R`).
