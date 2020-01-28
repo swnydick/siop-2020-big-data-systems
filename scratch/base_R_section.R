@@ -22,7 +22,7 @@ row_dat <- read.csv(file             = 'data/data_to_rowbind.csv',
 
 head(demos)
 head(scores)
-heed(row_dat)
+head(row_dat)
 
 ## investigating the data shows that there is a variable that we can get rid of:
 ## X; this variable is basically a hold-over that shows row position of the 
