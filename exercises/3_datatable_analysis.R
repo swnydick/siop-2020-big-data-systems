@@ -166,137 +166,100 @@ rbindlist(list(dt_1, dt_2), fill = TRUE)
 # finalizing the actual data we want to bind
 dt_comb   <- rbindlist(list(dt_comb_1, dt_comb_2), use.names = TRUE)
 
-# TO HERE #
-
 # 4. Reshaping =================================================================
 
 # the data is currently in wide format with each item (`X1`, ... , `X10`) a column
 # of the data - we might want to make the data so that each variable forms a
 # column and each observation forms a row.
 
-#   A. OLD WAY: gather + spread ------------------------------------------------
-var_name       <- "trait"
-val_name       <- "normed_score"
-tidy_comb_long <- gather(tidy_comb,
-                         key   = !!var_name,
-                         value = !!val_name,
-                         matches("^X[0-9]+$"))
-tidy_comb_wide <- spread(tidy_comb_long,
-                         key   = !!var_name,
-                         value = !!val_name)
+# data.table uses the dcast/melt functions (originally from the reshape2 package)
+var_name       <- "trait"        # the category variable (made from the columns)
+val_name       <- "normed_score" # the numeric varialbe (made from the values)
 
-# check if we've reversed everything
-all_equal(target  = tidy_comb_wide,
-          current = tidy_comb)
+# note that "patterns" is similar to the tidyverse function "matches"
+dt_comb_long   <- melt(dt_comb,
+                       measure.vars  = patterns("^X[0-9]+$"),
+                       variable.name = var_name,
+                       value.name    = val_name)
+dt_comb_wide   <- dcast(dt_comb_long,
+                        ... ~ trait,
+                        value.var = val_name)
 
-# note that gather's optional argument are the variables to make long
+# in our case, we're using two special functions:
+# - "patterns" is a function that says "we want to use this pattern to systematically
+#   indicate the response variables
+# - ... indicates "all other variables that are not mentioned anywhere else"
+# - x ~ y (x-vars are the subject vars, and y-vars are the transposed vars)
 
-# - can use raw variable names
-gather(tidy_comb,
-       key   = !!var_name,
-       value = !!val_name,
-       X1, X2, X3, X4, X5, X6, X7, X8, X9, X10)
-
-# - can use "-" syntax to remove variables we don't want to combine
-gather(tidy_comb,
-       key   = !!var_name,
-       value = !!val_name,
-       -guid, -data_level, -data_industry, -data_function)
-
-# - can use tidyselect helpers to select all variables that "starts_with" or
-#   "matches" or "ends_with" something
-gather(tidy_comb,
-       key   = !!var_name,
-       value = !!val_name,
-       starts_with("X"))
-
-#   B. NEW WAY: pivot_longer and pivot_wider -----------------------------------
-
-# essentially the same:
-#  - key is now "names_to" (in pivot_longer) and "names_from" (in pivot_wider)
-#  - value is now "values_to" (in pivot_longer) and "values_from" (in pivot_wider)
-#  - ... is now a single argument "cols"
-#  - other arguments indicate what to do AFTER the reshaping
-tidy_comb_long_2 <- pivot_longer(tidy_comb,
-                                 cols      = matches("^X[0-9]+$"),
-                                 names_to  = var_name,
-                                 values_to = val_name)
-tidy_comb_wide_2 <- pivot_wider(tidy_comb_long_2,
-                                names_from  = all_of(var_name),
-                                values_from = all_of(val_name))
-
-# check if we've reversed everything
-all_equal(target  = tidy_comb_wide_2,
-          current = tidy_comb_wide)
-all_equal(target  = tidy_comb_long_2,
-          current = tidy_comb_long)
-
-# note: see the additional file/documentation for other fun things to do with
-#       pivot_longer/pivot_wider as well as how to pivot from a specification
-#       data frame.
 
 # 5. Aggregating ===============================================================
 
+# aggregating starts to really take advantage of data.table syntax ... remember:
+# - everything is like "subsetting": DT[stuff goes here]
+# - first argument is what happens to the rows: DT[rows to extract and stuff]
+# - second argument is what happens to the cols: DT[ , cols to extract and stuff]
+#   - we CAN extract OR create new variables here
+# - "." is a synonym for "list"
+
 #   A. Long Format Data --------------------------------------------------------
 
-# if your data is in long format, you can simply do a group by and summarize
-# with each variable that you're calculating as additional call in summarize
-tidy_comb_long %>%
-  group_by(data_level, trait) %>%
-  summarize(mean_score = mean(normed_score),
-            sd_score   = sd(normed_score))
+# if your data is in long format, you can simply put what you want to aggregate
+# in the column argument and specify something for "by".
+dt_comb_long[, .(mean_score = mean(normed_score),
+                 sd_score   = sd(normed_score)),
+             by = .(data_level, trait)]
 
-# you can use another function (forcats, which deals with factors) to make trait
-# (or any other "factor" in the correct order)
-pull_out_number <- function(x){
-  stringr::str_extract(string = x,
-                       pattern = "[0-9]+") %>%
-  unique() %>%
-  as.numeric()
-}
+# you can also do this with standard evaluation
+# - by can be c("data_level", "trait")
+# - you can use "get" in the column argument if normed_score is a character string
+normed_var <- "normed_score"
+dt_comb_long[, .(mean_score = mean(get(normed_var)),
+                 sd_score   = sd(get(normed_var))),
+             by = c("data_level", "trait")]
 
-tidy_comb_long  <- tidy_comb_long %>%
-                   mutate(trait = as.factor(trait) %>%
-                                  fct_reorder(.f = .,
-                                              .x = .,
-                                              .fun = pull_out_number))
-
-# note that now the order is correct :)
-tidy_comb_long %>%
-  group_by(data_level, trait) %>%
-  summarize(mean_score = mean(normed_score),
-            sd_score   = sd(normed_score))
+# in both of these cases X10 seems to be coming at the end, so we don't need to
+# do the re-factoring of the previous methods here due to how things were
+# handled when converting to long format
                                   
 #   B. Wide Format Data --------------------------------------------------------
 
 # if your data is in wide format, you can manually specify each column you want
-# to aggregate
-tidy_comb_wide %>%
-   group_by(data_level) %>%
-   summarize(X1_mean = mean(X1),
-             X1_sd   = sd(X1),
-             X2_mean = mean(X2),
-             X2_sd   = sd(X2),
-             X3_mean = mean(X3),
-             X3_sd   = sd(X3))
+# to aggregate as you did before
+dt_comb_wide[, .(X1_mean = mean(X1),
+                 X1_sd   = sd(X1),
+                 X2_mean = mean(X2),
+                 X2_sd   = sd(X2),
+                 X3_mean = mean(X3),
+                 X3_sd   = sd(X3)),
+             by = data_level]
 
-# this gets unbelievably complicated
+# this can get a bit cumbersome
 
-# `dplyr`` has versions of `summarize` that work systematically on subsets of
-# the data without you having to specify those subsets directly.
-#  - `all` (do this thing on all of the columns)
-#  - `at` (do this thing on the columns specified)
-#  - `if` (do this thing to columns that are TRUE according to some function)
+# `data.table` has a special way of handeling sets of columns
+# - .SDcols is a list of a subset of columns to perform operations on
+# - You can then use the special variable .SD in the column argument (usually
+#   in a lapply statement) to do something on ALL specified columns
 
-# in each case, we can specify `.funs` which can be a named list of multiple
-# functions
-tidy_comb_wide %>%
-   group_by(data_level) %>%
-   summarize_at(.vars = vars(matches("^X[0-9]+$")),
-                .funs = list(mean = mean,
-                             sd   = sd))
+# this can be a bit gross in data table
+item_idx <- grep(x       = names(dt_comb_wide),
+                 pattern = "^X[0-9]+$")
 
-# note: that what is in "vars" is similar to how we selected columns for spread or
-# pivot_wider
 
-# additional examples are in a separate file!
+dt_comb_wide[, c(lapply(setNames(.SD, paste0("mean_", names(.SD))), mean),
+                 lapply(setNames(.SD, paste0("sd_",   names(.SD))), sd)),
+             by      = data_level,
+             .SDcols = item_idx]
+
+# you can also do this a slightly different, more verbose way
+# means      <- dt_wide[, lapply(.SD, mean),
+#                       by = data_level,
+#                       .SDcols = item_idx]
+# 
+# stdevs     <- dt_wide[, lapply(.SD, sd),
+#                       by = data_level,
+#                      .SDcols = item_idx]
+# 
+# summarised <- means[stdevs, on = "data_level"]
+#
+# setnames(summarised, gsub("^X", "mean_X", colnames(summarised)))
+# setnames(summarised, gsub("^i\\.X", "sd_X", colnames(summarised)))
