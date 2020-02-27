@@ -165,7 +165,7 @@ baser_comb_2  <- merge_ex_1
 
 # if all columns match, we can use rbind
 baser_comb    <- rbind(baser_comb_1,
-                      baser_comb_2)
+                       baser_comb_2)
 
 # if at least one column doesn't match ...
 baser_comb_ugh <- baser_comb_2[ , -3]

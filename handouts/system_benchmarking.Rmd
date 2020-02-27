@@ -1,0 +1,314 @@
+---
+title: "System Benchmarking"
+author: "Korn Ferry Institute: Automation Team"
+date: 2020-04-24
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      out.width  = '1600px',
+                      out.height = '900px',
+                      dpi        = 200)
+```
+
+
+The purpose of this document is to benchmark the big data systems against
+each other.
+
+## Required Packages
+
+We will install the needed packages from the other analyses. Even though a 
+package "bench" exists, we will use the package "microbenchmark" due to it
+not being tidy-dependent.
+
+```{r}
+options(repos = "https://cran.rstudio.com/",
+        stringsAsFactors = FALSE)
+
+cur_pkgs <- rownames(installed.packages())
+req_pkgs <- c("tidyverse",
+              "here",
+              "vroom",
+              "magrittr",
+              "data.table",
+              "microbenchmark")
+
+# determine packages that are missing
+miss_pkgs <- setdiff(x = req_pkgs,
+                     y = cur_pkgs)
+
+# installing missing packages
+if(length(miss_pkgs)){
+  install.packages(miss_pkgs)
+}
+```
+
+Let's load all of the relevant packages
+
+```{r}
+# load all of the relevant packages
+library(magrittr)
+library(tidyverse)
+library(data.table)
+```
+
+
+## Loading Data
+
+Indicate the current directory `R`:
+
+```{r}
+project_dir <- here::here()
+data_dir    <- file.path(project_dir, "data")
+```
+
+Benchmarks for small files:
+
+```{r}
+small_file <- file.path(data_dir, "demos_to_merge.csv")
+bnch       <- suppressWarnings(
+  suppressMessages(
+    microbenchmark::microbenchmark(
+      read.csv(small_file, header = TRUE),
+      read_csv(small_file),
+      fread(small_file),
+      vroom::vroom(small_file)
+    )
+  )
+)
+
+summary(bnch, unit = "relative")
+autoplot(bnch)
+```
+
+```{r}
+large_file <- file.path(data_dir, "master_data_20200110.csv")
+bnch       <- suppressWarnings(
+  suppressMessages(
+    microbenchmark::microbenchmark(
+      read.csv(large_file, header = TRUE),
+      read_csv(large_file),
+      fread(large_file),
+      vroom::vroom(large_file),
+      times = 2
+    )
+  )
+)
+
+summary(bnch, unit = "relative")
+autoplot(bnch)
+```
+
+Let's read in the small set of data and the large set of data and divide it
+so that it can be used to benchmark what follows. Note that we're not doing
+super-systematic benchmarks, just an example of large data and small data.
+
+```{r}
+read_data <- function(path){
+  read.csv(path)[-1]
+}
+
+# 1. READING SMALL #
+
+# we will use read.csv so as not to pick a fight with tidy vs data.table people
+small_demos    <- read_data(file.path(data_dir, "demos_to_merge.csv"))
+small_scores   <- read_data(file.path(data_dir, "scores_to_merge.csv"))
+small_comb_1   <- read_data(file.path(data_dir, "data_to_rowbind.csv"))
+
+# 2. READING LARGE #
+
+large_comb_all <- read_data(large_file)
+
+# 3. DIVING LARGE #
+
+# dividing large_comb_all into several sets
+n_rows_large   <- nrow(large_comb_all)
+merge_idx      <- seq_len(ceiling(n_rows_large / 5))
+
+large_comb_2   <- large_comb_all[merge_idx, ]
+large_demos    <- large_comb_2[names(small_demos)]
+large_scores   <- large_comb_2[names(small_scores)]
+
+large_comb_1   <- large_comb_all[-merge_idx, ]
+
+# 4. DATA TABLES #
+
+# turning some things into data.tables
+small_demos_dt <- as.data.table(small_demos)
+small_scores_dt <- as.data.table(small_scores)
+small_comb_1_dt <- as.data.table(small_comb_1)
+
+large_demos_dt  <- as.data.table(large_demos)
+large_scores_dt <- as.data.table(large_scores)
+large_comb_1_dt <- as.data.table(large_comb_1)
+```
+
+## Merging Data
+
+### Combine Variables
+
+First, let's indicate the ID variable
+
+```{r}
+id_var  <- "guid"
+```
+
+Let's write a function to test all of the joins so we don't have to repeat 
+everything
+
+```{r}
+test_joins <- function(x, y,
+                       by   = "guid",
+                       keep = 1){
+  
+  # make sure keep is length 2
+  keep    <- pmax(0, pmin(1, rep_len(keep, 2)))
+  
+  # sampling rows of x and y to match keep
+  x_and_y <- Map(
+    f   = function(df, prob){
+      n <- nrow(df)
+      df[sample.int(n, size = ceiling(prob * n)), , drop = FALSE]
+    },
+    df   = list(x = x, y = y),
+    prob = keep
+  )
+  
+  x       <- x_and_y$x
+  y       <- x_and_y$y
+  
+  
+  # turning into data.tables and setting keys
+  x_dt   <- as.data.table(x)
+  y_dt   <- as.data.table(y)
+  
+  setkeyv(x_dt, by)
+  setkeyv(y_dt, by)
+  
+  # running inner/left/right/outer
+  bnch_inner <- microbenchmark::microbenchmark(
+    merge(x, y, by = by, all = FALSE),
+    inner_join(x, y, by = by),
+    merge(x_dt, y_dt, by = by, all = FALSE),
+    x_dt[y_dt, nomatch = 0]
+  )
+
+  bnch_left <- microbenchmark::microbenchmark(
+    merge(x, y, by = by, all.x = TRUE),
+    left_join(x, y, by = by),
+    merge(x_dt, y_dt, by = by, all.x = TRUE),
+    x_dt[y_dt]
+  )
+  
+  bnch_right <- microbenchmark::microbenchmark(
+    merge(x, y, by = by, all.y = TRUE),
+    right_join(x, y, by = by),
+    merge(x_dt, y_dt, by = by, all.y = TRUE),
+    y_dt[x_dt]
+  )
+  
+  bnch_outer <- microbenchmark::microbenchmark(
+    merge(x, y, by = by, all = TRUE),
+    full_join(x, y, by = by),
+    merge(x_dt, y_dt, by = by, all = TRUE)
+  )
+  
+  list(inner = bnch_inner,
+       left  = bnch_left,
+       right = bnch_right,
+       outer = bnch_outer) %>%
+  lapply(FUN = function(bnch){
+    list(benchmark = bnch,
+         summary   = summary(bnch, unit = "relative"),
+         plot      = autoplot(bnch))
+  })
+}
+```
+
+Now let's run all of the comparisons on the complete small data
+
+```{r}
+bnch_join_small_1 <- test_joins(x  = small_demos,
+                                y  = small_scores,
+                                by = id_var)
+```
+
+And we can run all of the comparisons on the complete large data
+
+```{r}
+bnch_join_large_1 <- test_joins(x  = large_demos,
+                                y  = large_scores,
+                                by = id_var)
+```
+
+We can look at what happens when we have a certain proportion of the full data
+(with not all rows the same)
+
+```{r}
+set.seed(888)
+keep_perc         <- seq(.2, .8, by = .2)
+bnch_join_large_2 <- lapply(X   = keep_perc,
+                            FUN = test_joins,
+                            x   = large_demos,
+                            y   = large_scores,
+                            by  = id_var)
+```
+
+### Combine People
+
+Let's write a function that will take a data.frame and split it into multiple
+sets (so we don't have to rewrite everything).
+
+```{r}
+test_binds <- function(x,
+                       n_splits = 2){
+
+  # splitting data
+  x <- split.data.frame(x = x,
+                        f = rep_len(seq_len(n_splits), nrow(x)))
+  
+  # binding everything together again
+  bnch <- microbenchmark::microbenchmark(
+    do.call(rbind, x),
+    bind_rows(x),
+    rbindlist(x)
+  )
+  
+  list(benchmark = bnch,
+       summary   = summary(bnch, unit = "relative"),
+       plot      = autoplot(bnch))
+}
+```
+
+Specifying the total number of groups we always want to compare.
+
+```{r}
+n_groups        <- setNames(nm = seq(2, 102, by = 10))
+```
+
+Now let's run all of the binds on the small data for these groups.
+
+```{r}
+small_comb_all  <- rbind(merge(small_demos, small_scores),
+                         small_comb_1)
+bnch_bind_small <- lapply(X   = n_groups,
+                          FUN = test_binds,
+                          x   = small_comb_all)
+```
+
+And let's run all of the binds on the large data for these groups.
+
+```{r}
+bnch_bind_large <- lapply(X   = n_groups,
+                          FUN = test_binds,
+                          x   = large_comb_all)
+```
+
+## Reshaping Data
+
+
+## Aggregating Data
+
