@@ -1,0 +1,773 @@
+---
+title: "The Complete Tidyverse"
+author: "Korn Ferry Institute: Automation Team"
+date: 2020-04-24
+output:
+  html_document:
+    df_print: paged
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo       = TRUE,
+                      out.width  = '1600px',
+                      out.height = '900px',
+                      dpi        = 200)
+```
+
+
+The purpose of this document is to show how to do an analysis using only functions
+in the "Tidyverse" (if tidyverse functions exist).  We also discuss more extensive
+and newer "tidy" methods of reshaping data.
+
+## Required Packages
+
+The "Tidyverse" contains the "tidyverse" package (which installs and
+loads the entire tidyverse system) as well as "Tidyverse"-adjacent packages.
+Let's install the `tidyverse` and other packages required for this section.
+
+```{r}
+options(repos = "https://cran.rstudio.com/")
+
+cur_pkgs <- rownames(installed.packages())
+req_pkgs <- c("tidyverse",
+              "here",
+              "vctrs",
+              "fs",
+              "vroom",
+              "magrittr")
+
+# determine packages that are missing
+miss_pkgs <- setdiff(x = req_pkgs,
+                     y = cur_pkgs)
+
+# installing missing packages
+if(length(miss_pkgs)){
+  install.packages(miss_pkgs)
+}
+```
+
+Loading the tidyverse package provides two pieces of information:
+
+1. What "sub-packages" are part of the tidyverse system?
+2. What functions conflict with currently loaded functions?
+
+```{r}
+# load the tidyverse packages
+library(magrittr)
+library(tidyverse)
+```
+
+We can see that the tidyverse contains the following packages:
+
+1. `tibble`: a reimagining of the data.frame. Tibbles are like data.frames but
+   they have a different method of display, have some tidyverse benefits (like
+   using `rlang`), and yell at you if you try to take a shortcut to doing anything.
+2. `forcats`: functions to work with factors.
+3. `stringr`: functions to work with string process (essentially wrappers of the
+   `stringi` package, which is an alternative to string processing functions
+   in base `R`).
+4. `readr`: functions to read data into `R` and turn that data into `tibble`s.
+5. `tidyr`: functions for putting data into forms useful for summarization/aggregation.
+6. `dplyr`: functions designed to summarize/aggregate/manipulate data.
+7. `purrr`: functions for "functional programming" (map, reduce, filter). These are
+   essentially (slow) alternatives to `sapply`, `vapply`, `lapply`, `mapply` functions.
+8 `ggplot2`: functions for graphing in an alternate system than base `R`.
+
+Note that the conflicts indicates that once you load the tidyverse, the `filter`
+from `dplyr` supercedes the `filter` from `stats`. If you want to use the `filter`
+from the `stats` package, you would then need to fully condition the function
+(e.g., use `stats::filter` as the function name rather than `filter`).
+
+You can load each of the `tidyverse` packages by itself rather than the whole
+group of packages at once, but you can think of the Tidyverse being a framework
+and `tidyverse` package loading all dependencies required with working in that
+framework.
+
+These are not the "only" packages in the tidyverse. There are tidyverse-dependent
+packages (`rlang`, `vctrs`, `magrittr`, `crayon`, `cli`, `pillar`, `glue`,
+`tidyselect`), tidyverse-imporing packages (`vroom`, `readxl`, `haven`, `jsonlite`,
+`xml2`, `httr`, `rvest`, `DBI`), tidyverse-manipulation packages (`lubridate`,
+`hms`, `blob`). There is a separate whole area for package development (Tidy
+Development, which includes `devtools` and everything that `devtools` depends
+on) and modeling (`tidymodels` and everything that `tidymodels` depends on,
+including `broom`, `infer`, `modelr`, `recipes`, `rsample`, and `yardstick`).
+Note that the `tidymodels` package has the same setup as the `tidyverse` package.
+
+You can see whether all of the dependent tidyverse packages are out of date:
+
+```{r}
+# check to see if any dependencies are out of date
+tidyverse::tidyverse_update(recursive = TRUE)
+```
+
+And see which packages count as part of the `tidyverse`
+
+```{r}
+tidyverse::tidyverse_packages(include_self = FALSE)
+```
+
+## Loading Data
+
+If your data is in ".csv" format, there are two packages to load your data into
+`R` using the `tidyverse`: `readr` and `vroom`. If you are in an "R Project" in
+RStudio, the `here` package of the `tidyverse` will indicate the upper-most
+directory of the project, and the `fs` package of the `tidyverse` can create
+file paths.
+
+```{r}
+# pull project directory
+project_dir <- here::here()
+
+# combine file names to pull paths
+data_files  <- vctrs::vec_c(
+   demos  = "demos_to_merge",
+   scores = "scores_to_merge",
+   comb   = "data_to_rowbind"
+)
+
+# bind directory with file names to create file paths
+data_paths  <- rlang::set_names(
+   x  = fs::path(project_dir, "data", data_files, ext = "csv"),
+   nm = names(data_files)
+)
+
+# can check to make sure the files exist before reading them in
+print(fs::file_exists(data_paths))
+```
+
+You can use `read_csv` from the `readr` package or `vroom` from the `vroom`
+package to read the files into `R`.
+
+```{r}
+# method one of reading files
+tidy_data_1 <- map(.x = data_paths,
+                   .f = read_csv)
+
+# this is equilvalent to:
+# tidy_data_1 <- list(
+#   demos  = read_csv(data_files[1]),
+#   scores = read_csv(data_files[2]),
+#   comb   = read_csv(data_files[3])
+# )
+```
+
+Note that packages in the tidyverse tend to be chatty. If you don't specify
+something (and it has to make a guess), it will probably tell you what it
+guessed. Here you can specify the column types directly using the `col_types`
+argument. If you don't specify them, `read_csv` will try to guess whether they're
+double (`col_double`), character (`col_character`), logical (`col_logical`) or
+something else. Moreover, `read_csv` will **never** convert character strings
+to factors unless you specify this manually and will **always** convert the
+data into a `tibble`.
+
+```{r}
+tidy_data_1[[1]]
+```
+
+Notice also that `read_csv` converted row names to an `X1` column in the data,
+changed any `X1` column to something else (namely `X1_1`). There is no easy way
+to change this behavior (without specifying all of the columns to read in), but
+we can certainly fix it!
+
+```{r}
+# a function to remove the first column and rename any X1_1 column as X1
+remove_rowname_column <- function(tbl){
+   tbl <- tbl %>%
+          select(-1)
+   
+   # there are better ways of doing this that are more general
+   if("X1_1" %in% names(tbl)){
+      tbl <- tbl %>%
+             rename(X1 = X1_1)
+   }
+   
+   tbl
+}
+
+# removing the rownames column
+tidy_data_1 <- map(.x = tidy_data_1,
+                   .f = remove_rowname_column)
+```
+
+Note that we can also read in the data using the `vroom` function. This function
+is similar to `read_csv` but faster (and has additional storage capabilities
+in `R`). Notice that `vroom::vroom` has an argument, `col_select`, that allows
+us to drop the first column of the data (the column indicating the rowname)
+without applying the earlier function.
+
+```{r}
+# method two of reading files
+tidy_data_2 <- map(.x = data_paths,
+                   .f = vroom::vroom,
+                   col_select = -1)
+
+# this is equilvalent to:
+# tidy_data_2 <- list(
+#   demos  = vroom::vroom(data_files[1], col_select = -1),
+#   scores = vroom::vroom(data_files[2], col_select = -1),
+#   comb   = vroom::vroom(data_files[3], col_select = -1)
+# )
+```
+
+Note that the data looks the same as it did before.
+
+```{r}
+tidy_data_2[[1]]
+```
+
+Let's save these datasets as separate objects in `R` to be used for further
+analysis.
+
+```{r}
+tidy_demos  <- pluck(tidy_data_1, "demos")
+tidy_scores <- pluck(tidy_data_1, "scores")
+tidy_comb_1 <- pluck(tidy_data_1, "comb")
+```
+
+Note that we have three sets of data.
+
+1. `tidy_demos` are demographic data for some of the unique IDs in `tidy_scores`.
+
+```{r}
+tidy_demos
+```
+
+2. `tidy_scores` are scores on each of the variables for IDs in `tidy_demos`.
+
+```{r}
+tidy_scores
+```
+
+3. `tidy_comb_1` are combination of data (demos and scores combined) for IDs not
+   in `tidy_demos` or `tidy_scores`.
+   
+```{r}
+tidy_comb_1
+```
+
+## Merging Data
+
+The Tidyverse package `dplyr` contains several functions to merge two tibbles.
+Unlike base-R, which has one function to do all of the joining, the Tidyverse
+tries to make individual functions for specific goals (with each function
+having a different, descriptive name).
+
+1. `inner_join`: keep rows of `x` and rows of `y` that have the same elements
+   of the `by` variable. Named after the SQL join "INNER JOIN" or "JOIN".
+2. `left_join`: keep all rows of `x` and ONLY rows of `y` that have `by` elements
+   in `x`. Named after the SQL join "LEFT JOIN" or "LEFT OUTER JOIN".
+3. `right_join`: keep all rows of `y` and ONLY rows of `x` that have `by` elements
+   in `y`. Named after the SQL join "RIGHT JOIN" or "RIGHT OUTER JOIN".
+4. `full_join`: keep all rows of `x` and all rows of `y`. Named after the SQL
+   join "FULL JOIN" or "FULL OUTER JOIN".
+5. `semi_join`: keep rows of `x` that have `by` elements in `y`. Named after
+   the SQL join "LEFT SEMI JOIN".
+6. `anti_join`: keep rows of `x` that do not have `by` elements in `y`. Named
+   after the SQL join "LEFT ANTI JOIN".
+7. `nest_join`: keep all rows of `x` and put rows of `y` that have a
+   particular `by` element as an element of a "tibble" column.
+   
+To see how these work, let's remove some rows from `tidy_demos` and `tidy_scores`.
+Lets sort the rows ahead of time so that the joins return data in the same order.
+Note that merging in the Tidyverse doesn't automatically sort the rows unlike
+base R functions.
+
+```{r}
+# sort dfs by guid
+tidy_demos    <- tidy_demos %>%
+                 arrange(guid)
+tidy_scores   <- tidy_scores %>%
+                 arrange(guid)
+
+# remove a few odd rows from tidy_demos and even rows from tidy_scores
+tidy_demos_1  <- tidy_demos %>%
+                 mutate(row_n = row_number()) %>%
+                 slice(-vctrs::vec_c(1, 3, 5)) %>%
+                 select(row_n, everything())
+
+tidy_scores_1 <- tidy_scores %>%
+                 mutate(row_n = row_number()) %>%
+                 slice(-vctrs::vec_c(2, 4)) %>%
+                 select(row_n, everything())
+```
+
+Notice that the row variable is in order and can tell us what is going on. Also
+note that we removed rows 1, 3, 5 from the demographics data and 2, 4 from the
+scores data.
+
+```{r}
+tidy_demos_1
+tidy_scores_1
+```
+
+What happens when we apply each of the standard join types?
+
+```{r}
+id_var <- vctrs::vec_c("row_n", "guid")
+inner_join(x  = tidy_demos_1,
+           y  = tidy_scores_1,
+           by = id_var) %>%
+   arrange(row_n)
+
+left_join(x  = tidy_demos_1,
+          y  = tidy_scores_1,
+          by = id_var) %>%
+   arrange(row_n)
+
+right_join(x  = tidy_demos_1,
+           y  = tidy_scores_1,
+           by = id_var) %>%
+   arrange(row_n)
+
+full_join(x  = tidy_demos_1,
+          y  = tidy_scores_1,
+          by = id_var) %>%
+   arrange(row_n)
+```
+
+Note that the `inner_join` kept only `row` that was in both tables (6, ...),
+`left_join` kept `row` that was in the first table but not the second (2, 4, 6, ...),
+`right_join` kept `row` that was in the second table but not the first (1, 3, 5, 6, ...),
+and `full_join` kept all rows. In all cases, all of the variables were kept and
+data missing data (missing rows) for all variables were set to `NA`.
+
+Note that we can leave out the "by" argument (in some cases, where we want to
+merge on the only columns in common between two sets of data with those columns
+having the same names).
+
+```{r}
+inner_join(x = tidy_demos_1,
+           y = tidy_scores_1)
+```
+
+Filtering joins (`semi_join` and `anti_join`) are a quick way of keeping rows
+in the data by using "join" terminlogy rather than filtering data directly.
+
+```{r}
+# keep all tidy_demos_1 rows with equivalents in tidy_scores_1
+out <- semi_join(x  = tidy_demos_1,
+                 y  = tidy_scores_1,
+                 by = id_var)
+out
+names(out)
+
+# keep all tidy_demos_1 rows without equivalents in tidy_scores_1
+out <- anti_join(x  = tidy_demos_1,
+                 y  = tidy_scores_1,
+                 by = id_var)
+out
+names(out)
+```
+
+Note that `semi_join` was similar to `inner_join` but kept ONLY rows matching
+rows in `y`. Nested joins are more complicated and beyond the scope of this
+demonstration.
+
+Using the original data, because the rows are the same, using any of the combining
+joins will return the same data. If that's the case, the fastest should be the
+`inner_join`.
+
+```{r}
+id_var      <- "guid"
+tidy_comb_2 <- inner_join(x  = tidy_demos,
+                          y  = tidy_scores,
+                          by = id_var)
+```
+
+Finally, we have additional data (`tidy_comb_1`) that we want to combine with the
+merged data. We can bind everything together using `bind_rows`. The simplest way
+to use the function is in the same way that you use `rbind`.
+
+```{r}
+tidy_comb   <- bind_rows(tidy_comb_1,
+                         tidy_comb_2)
+tidy_comb
+```
+
+If your data is in a list format, the `bind_rows` function will also work.
+
+```{r}
+tidy_comb <- list(tidy_comb_1,
+                  tidy_comb_2) %>%
+             bind_rows()
+tidy_comb
+```
+
+We can also do a combination of lists and data frames.
+
+```{r}
+bind_rows(list(tidy_comb_1,
+               tidy_comb_2),
+          tidy_comb_1)
+```
+
+If you add an `.id` argument to `bind_rows`, `bind_rows` will add an extra column
+to indicate whether the data came from.
+
+```{r}
+bind_rows(tidy_comb_1,
+          tidy_comb_2,
+          .id = "source")
+bind_rows(blah = tidy_comb_1,
+          blee = tidy_comb_2,
+          .id  = "source")
+```
+
+Unlike `rbind`, `bind_rows` will work if your data does not have the same columns
+and simply fill the missing places with `NA`.
+
+```{r}
+df_1 <- select(tidy_comb_1,
+               1, 3, 5) %>%
+        slice(1, 2)
+df_1
+df_2 <- select(tidy_comb_2,
+               1, 2, 4, 6, 7) %>%
+        slice(1, 2)
+df_2
+```
+What happens when we combine the data together?
+
+```{r}
+bind_rows(df_1,
+          df_2)
+```
+
+However, `dplyr` will not convert columns, so if one of your columns is a character
+string in one dataset and numeric in another, `bind_rows` will error.
+
+```{r}
+# change the type of data
+df_1 <- tidy_comb_1 %>%
+        mutate(X1 = vctrs::vec_cast(x  = X1,
+                                    to = character()))
+df_2 <- tidy_comb_2
+
+# try to bind rows together
+safely(.f = bind_rows)(df_1, df_2)$error
+```
+
+## Reshaping Data
+
+Currently the data is in wide format with each item (`X1`-`X10`) a column of the
+data. Hadley Wickham defined Tidy data
+(e.g., "https://vita.had.co.nz/papers/tidy-data.pdf") as "Each variable forms
+a column; each observation forms a row; each type of observational unit forms
+a table" (Wickham, p. 4). Note that in the table, `guid`, `data_level`,
+`data_industry`, and `data_function` are clearly separate variables (so should
+form separate columns). One could argue that each of `X1`-`X10` are also separate
+variables (they are separate items or separate constructs). However they also
+might be a single item (`normed_score`) that aligns with a separate variable
+(`trait`). If we put the data in this format, it is called "long format".
+
+There are several functions for translating data from "wide" format to "long"
+format in `tidyr`. The legacy methods are `gather` (turn wide-data into long-data)
+and `spread` (turn long-data into wide-data):
+
+```{r}
+var_name       <- "trait"        # the category variable made from the columns
+val_name       <- "normed_score" # the numeric variable made from the values
+tidy_comb_long <- gather(tidy_comb,
+                         key   = !!var_name,
+                         value = !!val_name,
+                         matches("^X[0-9]+$"))
+tidy_comb_wide <- spread(tidy_comb_long,
+                         key    = !!var_name,
+                         value  = !!val_name)
+
+# check if we've reversed everything
+all_equal(target  = tidy_comb_wide,
+          current = tidy_comb)
+```
+
+Note that the rows and columns aren't necessarily in the same order, but we have
+reversed the operation.
+
+```{r}
+tidy_comb_long
+tidy_comb_wide
+```
+
+In this case, `gather` takes data in wide format and makes it in long format and
+`spread` takes data in long format and makes it in wide format. For both
+functions, the `key` argument is the variable in long format that matches the
+names of the variables in wide format, and `value` is the variable in long format
+that matches the variable values in wide format. An easy way to remember this is
+"key is the top of your data, and value indicates the entries". For `gather`,
+you also need to indicate which variables you want to turn into the "key" and
+"value" columns. Anything that you can do in `select`, you can do here:
+
+1. Select raw variable names
+
+```{r}
+gather(tidy_comb,
+       key   = !!var_name,
+       value = !!val_name,
+       X1, X2, X3, X4, X5, X6, X7, X8, X9, X10)
+```
+
+2. Remove raw variable names
+
+```{r}
+gather(tidy_comb,
+       key   = !!var_name,
+       value = !!val_name,
+       -guid, -data_level, -data_industry, -data_function)
+```
+
+3. Use `dplyr::select` helper functions: `matches` for pattern matching, 
+   `starts_with`, `ends_with`, `contains` for finding specific strings,
+   `num_range` for finding the actual range of values, `one_of` for character
+   vectors, etc.
+   
+```{r}
+gather(tidy_comb,
+       key   = !!var_name,
+       value = !!val_name,
+       starts_with("X"))
+```
+   
+Note also that for these functions `key` and `value` take raw variable names
+(either unquoted, such as trait or quoted such as "trait"). Because these
+functions take raw variable names, if you want to use a variable name saved
+in an object (such as `var_name <- "trait"`), you need to use "tidy unquoting
+methods". Essentially, this means putting two exclamation points in front of the
+variable. In other words, in the tidy framework, `!!x` means "use whatever is
+contained in the variable `x` and not the name `x` itself."
+   
+In current versions of `tidyr`, `spread` and `gather` are deprecated. The newer
+versions of those functions are called `pivot_wider` (matching `spread`) and
+`pivot_longer` (matching `gather`). We can accomplish the same results with
+these functions, but keep in mind that the application is a bit different. Note
+that "key" in gather/spread is now "names_to" (in `pivot_longer`) and "names_from"
+(in `pivot_wider`); value in gather/spread is now "values_to" (in `pivot_longer`)
+and "values_from" (in `pivot_wider`); "..." in gather is now indicated by a 
+single argument "cols" (in `pivot_longer`).
+
+```{r}
+tidy_comb_long_2 <- pivot_longer(tidy_comb,
+                                 cols      = matches("^X[0-9]+$"),
+                                 names_to  = var_name,
+                                 values_to = val_name)
+tidy_comb_wide_2 <- pivot_wider(tidy_comb_long_2,
+                                names_from  = all_of(var_name),
+                                values_from = all_of(val_name))
+
+# check if we've reversed everything
+all_equal(target  = tidy_comb_wide_2,
+          current = tidy_comb_wide)
+all_equal(target  = tidy_comb_long_2,
+          current = tidy_comb_long)
+```
+
+Notice that they got rid of the weird quoting rules, so that `names_to` and
+`values_to` ONLY take quoted variable names. This prevents needing to use the
+odd "tidy escape syntax" in these functions. These functions can do much more
+complicated things than `gather` and `spread`. For instance, `pivot_longer` can
+
+1. Use a regular expression to remove text from the start of each variable name
+
+```{r}
+pivot_longer(tidy_comb,
+             cols      = matches("^X[0-9]+$"),
+             names_to  = var_name,
+             values_to = val_name,
+             
+             # remove the "X" in front of the variable names
+             names_prefix = "^X")
+```
+
+2. Break up the names of the columns into separate "variables"
+
+```{r}
+pivot_longer(tidy_comb,
+             cols      = matches("^X[0-9]+$"),
+             values_to = val_name,
+             
+             # put the "X" in front of the variable names into a separate variable
+             names_to  = c("prefix", var_name),
+             names_sep = 1)
+```
+
+3. Indicate prototypes for what the type of names/values in the final data.
+
+If you really want to be creative with how to transform your data, you can use
+`build_wider_spec` and `pivot_wider_spec` or `build_longer_spec` and
+`pivot_longer_spec`. This allows you to build a specification for how to transform
+your dataset.
+
+```{r}
+tidy_comb_spec <- build_longer_spec(tidy_comb,
+                                    cols      = matches("^X[0-9]+$"),
+                                    names_to  = var_name,
+                                    values_to = val_name)
+tidy_comb_spec
+```
+
+In this case, we have several columns:
+
+1. `.name`: the name of the variable that we are going to do something with.
+2. `.value`: for a given name, what variable does the corresponding value go
+   into?
+3. Additional columns: for a given name, what is the value in additional
+   columns.
+   
+Because this is a tibble, we can mutate, change, update, add things, and the
+final `pivot_longer_spec` will use the specification to determine what to do
+with the final columns.
+
+```{r}
+tidy_comb_spec <- tidy_comb_spec %>%
+                  separate(col  = "trait",
+                           into = vctrs::vec_c("prefix", "trait_number"),
+                           sep  = 1) %>%
+                  mutate(.value = inset(.value,
+                                        2,
+                                        value = "whoops"),
+                         random = letters[vctrs::vec_seq_along(prefix)])
+tidy_comb_spec
+```
+
+Now we can apply this specification and `X1` will have its "value" go into the
+variable "normed_score" with the values of "prefix" to be "X", "trait_number" to
+be 1, and "random_variable" to be "a". However, `X2` will have its value go
+into the variable "whoops" with the values of "prefix" to be "X", "trait_number"
+to be 2, and "random_variable" to be "b".
+
+```{r}
+pivot_longer_spec(data = tidy_comb,
+                  spec = tidy_comb_spec) %>%
+   select(-(guid:data_function))
+```
+
+So a specification is effectively "for the variable with this name, where does
+its value go, what other variables need to be created, and what are the values
+of those variables?" Note that `pivot_longer_spec` and `pivot_wider_spec` use
+the same specification.
+
+```{r}
+all_equal(target  = tidy_comb,
+          current = tidy_comb %>%
+                    pivot_longer_spec(tidy_comb_spec) %>%
+                    pivot_wider_spec(tidy_comb_spec,
+                                     values_fn = list(whoops = first)))
+```
+
+Technically, the `values_fn` shouldn't be needed there, but the function is
+giving me "list" columns for the "whoops" variable (which seems to be a bug).
+
+## Aggregating Data
+
+How you would approach aggregating data in the Tidyverse framework depends on
+whether your data is in long format or wide format. If your data is in long
+format, then it would be easiest to use the `group_by` `summarize` pattern
+directly. In this case `group_by` is the variables we want to split by and
+`summarize` is the stuff that we want to happen within each group.
+
+```{r}
+tidy_comb_long %>%
+   group_by(data_level, trait) %>%
+   summarize(mean_score = mean(normed_score),
+             sd_score   = sd(normed_score))
+```
+In this case, we want to find the mean of each trait within each management
+level. `group_by` takes variables outer to inner, and then variables included
+in the output are ONLY the variables in the `group_by` and the created variables
+in the `summarize`. Everything else is gone. If you look at the `trait` column
+above, the traits aren't in the right order. We have "X1" followed by "X10"
+followed by "X2". This is because `trait` is just a character string, and
+character strings are parsed by each place from the beginning to the end of
+the string. We can change "trait" to a factor with appropriate levels using
+`mutate` (update data) mixed with functions from `forcats` (factors) and
+`stringr` (string processing).
+
+```{r}
+# function to sort levels by integer buried in string
+pull_out_number <- function(x){
+   stringr::str_extract(string = x,
+                        pattern = "[0-9]+") %>%
+   vctrs::vec_cast(to = integer()) %>%
+   unique()
+}
+
+# updating levels of trait to be in right order
+tidy_comb_long <- 
+   tidy_comb_long %>%
+   mutate(
+     trait = forcats::as_factor(trait) %>%
+             forcats::fct_reorder(.f   = .,
+                                  .x   = .,
+                                  .fun = pull_out_number)
+   )
+
+# rerun
+tidy_comb_long %>%
+   group_by(data_level, trait) %>%
+   summarize(mean_score = mean(normed_score),
+             sd_score   = sd(normed_score))
+```
+Now the order is correct! Unfortunately your data is in long format, which
+might be OK for follow-up analyses but difficult to present or compare for 
+reporting purposes. If you want your data in wide format, you can either take
+your long results and reshape it to be in wide format or you can analyze the
+wide format data.
+
+You can analyze the wide format data the same way that you did before (using
+`group_by` followed by `summarize`)
+
+```{r}
+# repeat this for all 10 variables ... ugh
+tidy_comb_wide %>%
+   group_by(data_level) %>%
+   summarize(X1_mean = mean(X1),
+             X1_sd   = sd(X1),
+             X2_mean = mean(X2),
+             X2_sd   = sd(X2),
+             X3_mean = mean(X3),
+             X3_sd   = sd(X3))
+```
+However, `dplyr` has versions of `summarize` (as well as all of the other `dplyr`
+verbs: `arrange`, `group_by`, `mutate`, `transmute`, `select`, `rename`, `filter`)
+that work systematically on subsets of the data without you having to specify
+those subsets directly.
+
+1. `_all`: do this thing (apply this function, usually) to all columns that are
+   (typically, although not always) grouping columns.
+2. `_at`: do this thing (apply this function, usually) to all columns that are
+   specified by `.vars` and are (typically, although not always) grouping
+   columns.
+3. `_if`: do this thing (apply this function, usually) to all columns that are
+   true given some `.predicate` function and are (typically, although not always)
+   grouping columns.
+   
+Note that `.funs` can either be a single function or a list of (possibly-named)
+functions. If `.funs` is a list of length more than 1, each function will be
+applied to each column. `.vars` is similar to what was specified earlier in the
+reshaping section, but it generally needs to be surrounded by the `vars`
+function (for some reason). In our case, we want to take the mean and sd of
+every non-grouping column that matches "X" followed by a number.
+
+```{r}
+tidy_comb_wide %>%
+   group_by(data_level) %>%
+   summarize_at(.vars = vars(matches("^X[0-9]+$")),
+                .funs = list(mean = mean,
+                             sd   = sd))
+```
+Alternatively, if that syntax is kind of weird, you can do something similar
+without the call to `matches`. To remove the unneeded columns, put a "-" in
+front of the columns not to summarize.
+
+```{r}
+tidy_comb_wide %>%
+   group_by(data_level) %>%
+   summarize_at(.vars = vars(-c("guid", "data_industry", "data_function")),
+                .funs = list(mean = mean,
+                             sd   = sd))
+```
+You can also do more complicated grouping aggregations. For example, you can
+fit a linear model within each group to work out, for example, which trait best
+predicts engagement, and then use functions in `broom` and `tidyr` to quickly
+display your output per group. `tibble`s are flexible because they allow for
+reasonable display of variables that are "lists" and not simple atomic vectors
+(which is a typical assumption when starting out learning `R`).
