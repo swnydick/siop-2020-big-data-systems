@@ -92,8 +92,7 @@ bnch       <- suppressWarnings(
       read.csv(large_file, header = TRUE),
       read_csv(large_file),
       fread(large_file),
-      vroom::vroom(large_file),
-      times = 2
+      vroom::vroom(large_file)
     )
   )
 )
@@ -308,6 +307,10 @@ bnch_bind_large <- lapply(X   = n_groups,
 ```
 
 ## Reshaping Data
+
+### Wide to Long
+
+### Long to Wide
 
 
 ## Aggregating Data
