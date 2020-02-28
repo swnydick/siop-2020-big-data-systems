@@ -22,10 +22,13 @@ each other.
 
 We will install the needed packages from the other analyses. Even though a 
 package "bench" exists, we will use the package "microbenchmark" due to it
-not being tidy-dependent.
+not being tidy-dependent. Also, "bench" requires the output of the benchmarked
+functions to return the exact same object, which is a bit overly strict for
+our purposes.
 
-```{r}
+```{r, results="hide"}
 options(repos = "https://cran.rstudio.com/",
+        warn  = -1,
         stringsAsFactors = FALSE)
 
 cur_pkgs <- rownames(installed.packages())
@@ -44,17 +47,68 @@ miss_pkgs <- setdiff(x = req_pkgs,
 if(length(miss_pkgs)){
   install.packages(miss_pkgs)
 }
-```
 
-Let's load all of the relevant packages
-
-```{r}
 # load all of the relevant packages
 library(magrittr)
 library(tidyverse)
 library(data.table)
+library(microbenchmark)
 ```
 
+Let's also put a function that will run the benchmark for everything and
+suppress warnings/messages.
+
+```{r}
+run_benchmark <- function(...){
+  require(microbenchmark)
+  
+  # fixing call by adding microbenchmark
+  cur_call      <- match.call()
+  cur_call[[1]] <- as.name("microbenchmark")
+  
+  # running and suppressing messages/warnings
+  bnch          <- suppressWarnings(
+    suppressMessages(
+      eval(cur_call, envir = parent.frame())
+    )
+  )
+  
+  # creating list of benchmark/summary/plot
+  list(benchmark = bnch,
+       summary   = suppressMessages(summary(bnch, unit = "relative")),
+       plot      = autoplot(bnch))
+}
+```
+
+Let's also put a function that will plot benchmarks if we are combining a bunch
+of benchmarks in a list.
+
+```{r}
+plot_benchmarks <- function(bnch_list,
+                            id   = "percent_missing",
+                            unit = "relative",
+                            use  = "median"){
+  
+  # get data and put in data.frame
+  dfs <- lapply(bnch_list,
+                FUN = "[[",
+                "benchmark") %>%
+         lapply(FUN  = summary,
+                unit = unit) %>%
+         bind_rows(.id = id)
+  
+  # make sure the levels are in order
+  dfs[[id]] %<>% factor(levels = unique(.))
+  
+  # make simple barplot
+  ggplot(data    = dfs,
+         mapping = aes(x = !!sym(id),
+                       y = !!sym(use),
+                       fill = expr)) +
+  geom_col(position = position_dodge()) +
+  theme_minimal()
+}
+```
 
 ## Loading Data
 
@@ -68,37 +122,27 @@ data_dir    <- file.path(project_dir, "data")
 Benchmarks for small files:
 
 ```{r}
-small_file <- file.path(data_dir, "demos_to_merge.csv")
-bnch       <- suppressWarnings(
-  suppressMessages(
-    microbenchmark::microbenchmark(
-      read.csv(small_file, header = TRUE),
-      read_csv(small_file),
-      fread(small_file),
-      vroom::vroom(small_file)
-    )
-  )
+small_file      <- file.path(data_dir, "demos_to_merge.csv")
+bnch_read_small <- run_benchmark(
+  read.csv(small_file, header = TRUE),
+  read_csv(small_file),
+  vroom::vroom(small_file),
+  fread(small_file)
 )
 
-summary(bnch, unit = "relative")
-autoplot(bnch)
+bnch_read_small
 ```
 
-```{r}
-large_file <- file.path(data_dir, "master_data_20200110.csv")
-bnch       <- suppressWarnings(
-  suppressMessages(
-    microbenchmark::microbenchmark(
-      read.csv(large_file, header = TRUE),
-      read_csv(large_file),
-      fread(large_file),
-      vroom::vroom(large_file)
-    )
-  )
-)
+Benchmarks for large files:
 
-summary(bnch, unit = "relative")
-autoplot(bnch)
+```{r}
+large_file      <- file.path(data_dir, "master_data_20200110.csv")
+bnch_read_large <- run_benchmark(
+  read.csv(large_file, header = TRUE),
+  read_csv(large_file),
+  fread(large_file),
+  vroom::vroom(large_file)
+)
 ```
 
 Let's read in the small set of data and the large set of data and divide it
@@ -117,6 +161,11 @@ small_demos    <- read_data(file.path(data_dir, "demos_to_merge.csv"))
 small_scores   <- read_data(file.path(data_dir, "scores_to_merge.csv"))
 small_comb_1   <- read_data(file.path(data_dir, "data_to_rowbind.csv"))
 
+# creating additional combination data for benchmarking
+small_comb_2   <- merge(small_demos, small_scores)
+small_comb_all <- rbind(small_comb_1,
+                        small_comb_2)
+
 # 2. READING LARGE #
 
 large_comb_all <- read_data(large_file)
@@ -127,38 +176,22 @@ large_comb_all <- read_data(large_file)
 n_rows_large   <- nrow(large_comb_all)
 merge_idx      <- seq_len(ceiling(n_rows_large / 5))
 
+large_comb_1   <- large_comb_all[-merge_idx, ]
 large_comb_2   <- large_comb_all[merge_idx, ]
 large_demos    <- large_comb_2[names(small_demos)]
 large_scores   <- large_comb_2[names(small_scores)]
-
-large_comb_1   <- large_comb_all[-merge_idx, ]
-
-# 4. DATA TABLES #
-
-# turning some things into data.tables
-small_demos_dt <- as.data.table(small_demos)
-small_scores_dt <- as.data.table(small_scores)
-small_comb_1_dt <- as.data.table(small_comb_1)
-
-large_demos_dt  <- as.data.table(large_demos)
-large_scores_dt <- as.data.table(large_scores)
-large_comb_1_dt <- as.data.table(large_comb_1)
 ```
 
 ## Merging Data
 
 ### Combine Variables
 
-First, let's indicate the ID variable
+First, let's have some preliminary objects.
+1. The variable marking the "ID" columns in which we are going to merge.
+2. A function to automatically perform the merges and return useful results.
 
 ```{r}
-id_var  <- "guid"
-```
-
-Let's write a function to test all of the joins so we don't have to repeat 
-everything
-
-```{r}
+id_var     <- "guid"
 test_joins <- function(x, y,
                        by   = "guid",
                        keep = 1){
@@ -176,6 +209,7 @@ test_joins <- function(x, y,
     prob = keep
   )
   
+  # pulling out x and y for purposes of merging
   x       <- x_and_y$x
   y       <- x_and_y$y
   
@@ -188,28 +222,28 @@ test_joins <- function(x, y,
   setkeyv(y_dt, by)
   
   # running inner/left/right/outer
-  bnch_inner <- microbenchmark::microbenchmark(
+  bnch_inner <- run_benchmark(
     merge(x, y, by = by, all = FALSE),
     inner_join(x, y, by = by),
     merge(x_dt, y_dt, by = by, all = FALSE),
     x_dt[y_dt, nomatch = 0]
   )
 
-  bnch_left <- microbenchmark::microbenchmark(
+  bnch_left <- run_benchmark(
     merge(x, y, by = by, all.x = TRUE),
     left_join(x, y, by = by),
     merge(x_dt, y_dt, by = by, all.x = TRUE),
     x_dt[y_dt]
   )
   
-  bnch_right <- microbenchmark::microbenchmark(
+  bnch_right <- run_benchmark(
     merge(x, y, by = by, all.y = TRUE),
     right_join(x, y, by = by),
     merge(x_dt, y_dt, by = by, all.y = TRUE),
     y_dt[x_dt]
   )
   
-  bnch_outer <- microbenchmark::microbenchmark(
+  bnch_outer <- run_benchmark(
     merge(x, y, by = by, all = TRUE),
     full_join(x, y, by = by),
     merge(x_dt, y_dt, by = by, all = TRUE)
@@ -218,67 +252,108 @@ test_joins <- function(x, y,
   list(inner = bnch_inner,
        left  = bnch_left,
        right = bnch_right,
-       outer = bnch_outer) %>%
-  lapply(FUN = function(bnch){
-    list(benchmark = bnch,
-         summary   = summary(bnch, unit = "relative"),
-         plot      = autoplot(bnch))
-  })
+       outer = bnch_outer)
 }
 ```
 
-Now let's run all of the comparisons on the complete small data
+Benchmarks for small data:
 
 ```{r}
 bnch_join_small_1 <- test_joins(x  = small_demos,
                                 y  = small_scores,
                                 by = id_var)
+
+# Inner
+bnch_join_small_1$inner
+
+# Left
+bnch_join_small_1$left
+
+# Right
+bnch_join_small_1$right
+
+# Outer
+bnch_join_small_1$outer
 ```
 
-And we can run all of the comparisons on the complete large data
+Benchmarks for large data:
 
 ```{r}
 bnch_join_large_1 <- test_joins(x  = large_demos,
                                 y  = large_scores,
                                 by = id_var)
+
+# Inner
+bnch_join_large_1$inner
+
+# Left
+bnch_join_large_1$left
+
+# Right
+bnch_join_large_1$right
+
+# Outer
+bnch_join_large_1$outer
 ```
 
 We can look at what happens when we have a certain proportion of the full data
-(with not all rows the same)
+(with not all rows the same).
 
 ```{r}
 set.seed(888)
-keep_perc         <- seq(.2, .8, by = .2)
-bnch_join_large_2 <- lapply(X   = keep_perc,
-                            FUN = test_joins,
-                            x   = large_demos,
-                            y   = large_scores,
-                            by  = id_var)
+keep_perc            <- setNames(nm = seq(.2, .8, by = .2))
+
+# running benchmarks
+bnch_join_large_2    <- lapply(X   = keep_perc,
+                               FUN = test_joins,
+                               x   = large_demos,
+                               y   = large_scores,
+                               by  = id_var)
+
+# rearranging outer and inner lists
+bnch_join_large_2    <- do.call(what = Map,
+                                args = c(list(f = list), bnch_join_large_2))
+
+# creating plots of all of the benchmarks
+bnch_join_large_2_gg <- lapply(X    = bnch_join_large_2,
+                               FUN  = plot_benchmarks,
+                               id   = "percent_missing",
+                               unit = "relative",
+                               use  = "median")
+
+# Inner
+bnch_join_large_2_gg$inner
+
+# Left
+bnch_join_large_2_gg$left
+
+# Right
+bnch_join_large_2_gg$right
+
+# Outer
+bnch_join_large_2_gg$outer
 ```
 
 ### Combine People
 
-Let's write a function that will take a data.frame and split it into multiple
-sets (so we don't have to rewrite everything).
+First, let's have some preliminary objects.
+1. A function to automatically splits the data, binds the data, and returns
+   useful results.
 
 ```{r}
 test_binds <- function(x,
                        n_splits = 2){
 
   # splitting data
-  x <- split.data.frame(x = x,
-                        f = rep_len(seq_len(n_splits), nrow(x)))
+  x    <- split.data.frame(x = x,
+                           f = rep_len(seq_len(n_splits), nrow(x)))
   
   # binding everything together again
-  bnch <- microbenchmark::microbenchmark(
+  run_benchmark(
     do.call(rbind, x),
     bind_rows(x),
     rbindlist(x)
   )
-  
-  list(benchmark = bnch,
-       summary   = summary(bnch, unit = "relative"),
-       plot      = autoplot(bnch))
 }
 ```
 
@@ -288,30 +363,295 @@ Specifying the total number of groups we always want to compare.
 n_groups        <- setNames(nm = seq(2, 102, by = 10))
 ```
 
-Now let's run all of the binds on the small data for these groups.
+Benchmarks for small data:
 
 ```{r}
-small_comb_all  <- rbind(merge(small_demos, small_scores),
-                         small_comb_1)
 bnch_bind_small <- lapply(X   = n_groups,
                           FUN = test_binds,
                           x   = small_comb_all)
+plot_benchmarks(
+  bnch_list = bnch_bind_small,
+  id        = "n_groups",
+  unit      = "relative",
+  use       = "median"
+)
 ```
 
-And let's run all of the binds on the large data for these groups.
+Benchmarks for large data:
 
 ```{r}
 bnch_bind_large <- lapply(X   = n_groups,
                           FUN = test_binds,
                           x   = large_comb_all)
+plot_benchmarks(
+  bnch_list = bnch_bind_large,
+  id        = "n_groups",
+  unit      = "relative",
+  use       = "median"
+)
 ```
 
 ## Reshaping Data
 
+Let's have some preliminary objects across all of the reshaping.
+1. The name of the variable column and value column
+2. The entries in the value column (for wide data).
+
+```{r}
+var_name  <- "trait"
+val_name  <- "normed_score"
+var_vals  <- grep(x       = names(small_scores),
+                  pattern = "^X[0-9]+",
+                  value   = TRUE)
+```
+
 ### Wide to Long
 
+We can add functions to quickly reshape data and make it easier to apply.
+
+```{r}
+wide_to_long_base <- function(df){
+  reshape(df,
+          varying   = var_vals,
+          v.names   = val_name,
+          timevar   = var_name,
+          idvar     = names(small_demos),
+          direction = "long")
+}
+
+wide_to_long_tidy_gather <- function(df){
+  gather(df,
+         key    = !!var_name,
+         value  = !!val_name,
+         one_of(var_vals))
+}
+
+wide_to_long_tidy_pivot <- function(df){
+  pivot_longer(df,
+               cols      = var_vals,
+               names_to  = var_name,
+               values_to = val_name)
+}
+
+wide_to_long_dt   <- function(df){
+  melt(as.data.table(df),
+       measure.vars  = var_vals,
+       variable.name = var_name,
+       value.name    = val_name)
+}
+```
+
+Benchmarks for small data:
+
+```{r}
+bnch_shape_long_small <- run_benchmark(
+  wide_to_long_base(small_comb_all),
+  wide_to_long_tidy_gather(small_comb_all),
+  wide_to_long_tidy_pivot(small_comb_all),
+  wide_to_long_dt(small_comb_all)
+)
+
+bnch_shape_long_small
+```
+
+Benchmarks for large data:
+
+```{r}
+bnch_shape_long_large <- run_benchmark(
+  wide_to_long_base(large_comb_all),
+  wide_to_long_tidy_gather(large_comb_all),
+  wide_to_long_tidy_pivot(large_comb_all),
+  wide_to_long_dt(large_comb_all)
+)
+
+bnch_shape_long_large
+```
+
 ### Long to Wide
+
+We can add functions to quickly reshape data and make it easier to apply and
+create long data for benchmarking purposes.
+
+```{r}
+small_comb_long_all <- as.data.frame(wide_to_long_dt(small_comb_all))
+large_comb_long_all <- as.data.frame(wide_to_long_dt(large_comb_all))
+
+long_to_wide_base <- function(df){
+  reshape(df,
+          v.names   = val_name,
+          timevar   = var_name,
+          idvar     = names(small_demos),
+          direction = "wide")
+}
+
+long_to_wide_tidy_gather <- function(df){
+  spread(df,
+         key    = !!var_name,
+         value  = !!val_name)
+}
+
+long_to_wide_tidy_pivot <- function(df){
+  pivot_wider(df,
+              names_from  = var_name,
+              values_from = val_name)
+}
+
+long_to_wide_dt   <- function(df){
+  dcast(as.data.table(df),
+        as.formula(paste0("... ~", var_name)),
+        value.var = val_name)
+}
+```
+
+Benchmarks for small data:
+
+```{r}
+bnch_shape_wide_small <- run_benchmark(
+  long_to_wide_base(small_comb_long_all),
+  long_to_wide_tidy_gather(small_comb_long_all),
+  long_to_wide_tidy_pivot(small_comb_long_all),
+  long_to_wide_dt(small_comb_long_all)
+)
+
+bnch_shape_wide_small
+```
+
+Benchmarks for large data:
+
+```{r}
+bnch_shape_wide_large <- run_benchmark(
+  long_to_wide_base(large_comb_long_all),
+  long_to_wide_tidy_gather(large_comb_long_all),
+  long_to_wide_tidy_pivot(large_comb_long_all),
+  long_to_wide_dt(large_comb_long_all)
+)
+
+bnch_shape_wide_large
+```
 
 
 ## Aggregating Data
 
+Let's have some preliminary objects across all of the reshaping.
+1. The name of the variable column and value column
+2. The entries in the value column (for wide data).
+
+```{r}
+var_name  <- "trait"
+val_name  <- "normed_score"
+var_vals  <- grep(x       = names(small_scores),
+                  pattern = "^X[0-9]+",
+                  value   = TRUE)
+```
+
+### Long Format Data
+
+We can add functions to quickly aggregate data and make it easier to apply
+(using NSE to remove overhead of pasting and creating formulas).
+
+```{r}
+aggr_long_base <- function(df){
+  mn <- aggregate(normed_score ~ data_level + trait,
+                  FUN  = mean,
+                  data = df)
+  sd <- aggregate(normed_score ~ data_level + trait,
+                  FUN  = sd,
+                  data = df)
+  list(mn, sd)
+}
+
+aggr_long_tidy <- function(df){
+  df %>%
+    group_by(data_level, trait) %>%
+    summarize(mean_score = mean(normed_score),
+              sd_score   = sd(normed_score))
+}
+
+aggr_long_dt   <- function(df){
+  dt <- as.data.table(df)
+  dt[, .(mean_score = mean(normed_score),
+         sd_score   = sd(normed_score)),
+     by = .(data_level, trait)]
+}
+```
+
+Benchmarks for small data:
+
+```{r}
+bnch_aggr_long_small <- run_benchmark(
+  aggr_long_base(small_comb_long_all),
+  aggr_long_tidy(small_comb_long_all),
+  aggr_long_dt(small_comb_long_all)
+)
+
+bnch_aggr_long_small
+```
+
+Benchmarks for large data:
+
+```{r}
+bnch_aggr_long_large <- run_benchmark(
+  aggr_long_base(large_comb_long_all),
+  aggr_long_tidy(large_comb_long_all),
+  aggr_long_dt(large_comb_long_all)
+)
+
+bnch_aggr_long_large
+```
+
+### Wide Format Data
+
+We can add functions to quickly aggregate data and make it easier to apply
+(using NSE to remove overhead of pasting and creating formulas).
+
+```{r}
+aggr_wide_base <- function(df){
+  mn <- aggregate(x   = df[var_vals],
+                  by  = df[c("data_level")],
+                  FUN = mean)
+  sd <- aggregate(x   = df[var_vals],
+                  by  = df[c("data_level")],
+                  FUN = sd)
+  list(mn, sd)
+}
+
+aggr_wide_tidy <- function(df){
+  df %>%
+    group_by(data_level) %>%
+     summarize_at(.vars = var_vals,
+                  .funs = list(mean = mean,
+                               sd   = sd))
+}
+
+aggr_wide_dt   <- function(df){
+  dt       <- as.data.table(df)
+  dt[, c(lapply(setNames(.SD, paste0("mean_", names(.SD))), mean),
+         lapply(setNames(.SD, paste0("sd_",   names(.SD))), sd)),
+     by      = data_level,
+     .SDcols = var_vals]
+}
+```
+
+Benchmarks for small data:
+
+```{r}
+bnch_aggr_wide_small <- run_benchmark(
+  aggr_wide_base(small_comb_all),
+  aggr_wide_tidy(small_comb_all),
+  aggr_wide_dt(small_comb_all)
+)
+
+bnch_aggr_wide_small
+```
+
+Benchmarks for large data:
+
+```{r}
+bnch_aggr_wide_large <- run_benchmark(
+  aggr_wide_base(large_comb_all),
+  aggr_wide_tidy(large_comb_all),
+  aggr_wide_dt(large_comb_all)
+)
+
+bnch_aggr_wide_large
+```
