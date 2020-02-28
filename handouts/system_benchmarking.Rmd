@@ -16,7 +16,14 @@ knitr::opts_chunk$set(echo       = TRUE,
 
 
 The purpose of this document is to benchmark the big data systems against
-each other.
+each other. Here are the properties of the machine that is benchmarking the
+code.
+
+```{bash}
+sysctl -n machdep.cpu.brand_string
+printf -v a "Number of processors: %s" $(sysctl -n hw.ncpu)
+echo $a
+```
 
 ## Required Packages
 
@@ -59,7 +66,7 @@ Let's also put a function that will run the benchmark for everything and
 suppress warnings/messages.
 
 ```{r}
-run_benchmark <- function(...){
+run_benchmark <- function(..., unit = "ms"){
   require(microbenchmark)
   
   # fixing call by adding microbenchmark
@@ -75,7 +82,8 @@ run_benchmark <- function(...){
   
   # creating list of benchmark/summary/plot
   list(benchmark = bnch,
-       summary   = suppressMessages(summary(bnch, unit = "relative")),
+       default   = summary(bnch, unit = unit),
+       relative  = summary(bnch, unit = "relative"),
        plot      = autoplot(bnch))
 }
 ```
