@@ -94,6 +94,3 @@ vignettes/*.pdf
 # Temporary files created by R markdown
 *.utf8.md
 *.knit.md
-
-# Large files!
-data/Master_Data_20200110.csv
