@@ -1,7 +1,7 @@
 ---
 title: "System Benchmarking"
 author: "Korn Ferry Institute: Automation Team"
-date: 2020-04-24
+date: 2021-04-15
 output:
   html_document:
     df_print: paged
@@ -110,8 +110,8 @@ plot_benchmarks <- function(bnch_list,
   
   # make simple barplot
   ggplot(data    = dfs,
-         mapping = aes(x = !!sym(id),
-                       y = !!sym(use),
+         mapping = aes(x    = !!sym(id),
+                       y    = !!sym(use),
                        fill = expr)) +
   geom_col(position = position_dodge()) +
   theme_minimal()
@@ -500,8 +500,8 @@ long_to_wide_tidy_gather <- function(df){
 
 long_to_wide_tidy_pivot <- function(df){
   pivot_wider(df,
-              names_from  = var_name,
-              values_from = val_name)
+              names_from  = !!var_name,
+              values_from = !!val_name)
 }
 
 long_to_wide_dt   <- function(df){
@@ -626,9 +626,9 @@ aggr_wide_base <- function(df){
 aggr_wide_tidy <- function(df){
   df %>%
     group_by(data_level) %>%
-     summarize_at(.vars = var_vals,
-                  .funs = list(mean = mean,
-                               sd   = sd))
+    summarize(across(.cols = all_of(var_vals),
+                     .fns  = list(mean = mean,
+                                  sd   = sd)))
 }
 
 aggr_wide_dt   <- function(df){

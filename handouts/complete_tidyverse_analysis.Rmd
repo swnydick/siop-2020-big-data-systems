@@ -1,7 +1,7 @@
 ---
 title: "The Complete Tidyverse"
 author: "Korn Ferry Institute: Automation Team"
-date: 2020-04-24
+date: 2021-04-15
 output:
   html_document:
     df_print: paged
@@ -76,7 +76,9 @@ We can see that the tidyverse contains the following packages:
 Note that the conflicts indicates that once you load the tidyverse, the `filter`
 from `dplyr` supercedes the `filter` from `stats`. If you want to use the `filter`
 from the `stats` package, you would then need to fully condition the function
-(e.g., use `stats::filter` as the function name rather than `filter`).
+(e.g., use `stats::filter` as the function name rather than `filter`). There
+are a few other functions that supercede other functions in base R and other
+currently loaded packages.
 
 You can load each of the `tidyverse` packages by itself rather than the whole
 group of packages at once, but you can think of the Tidyverse being a framework
@@ -90,8 +92,9 @@ packages (`rlang`, `vctrs`, `magrittr`, `crayon`, `cli`, `pillar`, `glue`,
 `hms`, `blob`). There is a separate whole area for package development (Tidy
 Development, which includes `devtools` and everything that `devtools` depends
 on) and modeling (`tidymodels` and everything that `tidymodels` depends on,
-including `broom`, `infer`, `modelr`, `recipes`, `rsample`, and `yardstick`).
-Note that the `tidymodels` package has the same setup as the `tidyverse` package.
+including `broom`, `dial` `infer`, `modelr`, `parsnip` `recipes`, `rsample`,
+`tune`, `workflows`, and `yardstick`). Note that the `tidymodels` package has
+the same setup as the `tidyverse` package.
 
 You can see whether all of the dependent tidyverse packages are out of date:
 
@@ -439,8 +442,7 @@ string in one dataset and numeric in another, `bind_rows` will error.
 ```{r}
 # change the type of data
 df_1 <- tidy_comb_1 %>%
-        mutate(X1 = vctrs::vec_cast(x  = X1,
-                                    to = character()))
+        mutate(X1 = as.character(X1))
 df_2 <- tidy_comb_2
 
 # try to bind rows together
@@ -562,8 +564,10 @@ all_equal(target  = tidy_comb_long_2,
 
 Notice that they got rid of the weird quoting rules, so that `names_to` and
 `values_to` ONLY take quoted variable names. This prevents needing to use the
-odd "tidy escape syntax" in these functions. These functions can do much more
-complicated things than `gather` and `spread`. For instance, `pivot_longer` can
+odd "tidy escape syntax" in these functions. `names_from` and `values_from` also
+take quoted/unquoted variable names, but they will warn you if the variables are
+not escaped due to ambiguity. These functions can do much more complicated
+things than `gather` and `spread`. For instance, `pivot_longer` can
 
 1. Use a regular expression to remove text from the start of each variable name
 
@@ -686,7 +690,7 @@ the string. We can change "trait" to a factor with appropriate levels using
 pull_out_number <- function(x){
    stringr::str_extract(string = x,
                         pattern = "[0-9]+") %>%
-   vctrs::vec_cast(to = integer()) %>%
+   as.integer() %>%
    unique()
 }
 
@@ -710,7 +714,9 @@ Now the order is correct! Unfortunately your data is in long format, which
 might be OK for follow-up analyses but difficult to present or compare for 
 reporting purposes. If you want your data in wide format, you can either take
 your long results and reshape it to be in wide format or you can analyze the
-wide format data.
+wide format data. Note also that the `summarize` function will update the
+grouping structure of the data, although you can change this by modifying the
+`.groups` argument.
 
 You can analyze the wide format data the same way that you did before (using
 `group_by` followed by `summarize`)
@@ -726,9 +732,9 @@ tidy_comb_wide %>%
              X3_mean = mean(X3),
              X3_sd   = sd(X3))
 ```
-However, `dplyr` has versions of `summarize` (as well as all of the other `dplyr`
+`dplyr` use to have versions of `summarize` (as well as all of the other `dplyr`
 verbs: `arrange`, `group_by`, `mutate`, `transmute`, `select`, `rename`, `filter`)
-that work systematically on subsets of the data without you having to specify
+that worked systematically on subsets of the data without you having to specify
 those subsets directly.
 
 1. `_all`: do this thing (apply this function, usually) to all columns that are
@@ -740,19 +746,20 @@ those subsets directly.
    true given some `.predicate` function and are (typically, although not always)
    grouping columns.
    
-Note that `.funs` can either be a single function or a list of (possibly-named)
-functions. If `.funs` is a list of length more than 1, each function will be
-applied to each column. `.vars` is similar to what was specified earlier in the
-reshaping section, but it generally needs to be surrounded by the `vars`
-function (for some reason). In our case, we want to take the mean and sd of
-every non-grouping column that matches "X" followed by a number.
+However, now `dplyr` has included an additional function `across` that can be
+thrown into the standard `dplyr` verbs, perhaps with other sets of verbs to
+summarize together. For `across`, `.fns` can either be a single function or a 
+list of (possibly-named) functions. If `.fns` is a list of length more than 1,
+each function will be applied to each column. `.cols` is similar to what was
+specified earlier in the reshaping section, In our case, we want to take the
+mean and sd of every non-grouping column that matches "X" followed by a number.
 
 ```{r}
 tidy_comb_wide %>%
    group_by(data_level) %>%
-   summarize_at(.vars = vars(matches("^X[0-9]+$")),
-                .funs = list(mean = mean,
-                             sd   = sd))
+   summarize(across(.cols = matches("^X[0-9]+$"),
+                    .fns  = list(mean = mean,
+                                 sd   = sd)))
 ```
 Alternatively, if that syntax is kind of weird, you can do something similar
 without the call to `matches`. To remove the unneeded columns, put a "-" in
@@ -761,9 +768,9 @@ front of the columns not to summarize.
 ```{r}
 tidy_comb_wide %>%
    group_by(data_level) %>%
-   summarize_at(.vars = vars(-c("guid", "data_industry", "data_function")),
-                .funs = list(mean = mean,
-                             sd   = sd))
+   summarize(across(.cols = -c("guid", "data_industry", "data_function"),
+                    .fns  = list(mean = mean,
+                                 sd   = sd)))
 ```
 You can also do more complicated grouping aggregations. For example, you can
 fit a linear model within each group to work out, for example, which trait best
@@ -771,3 +778,9 @@ predicts engagement, and then use functions in `broom` and `tidyr` to quickly
 display your output per group. `tibble`s are flexible because they allow for
 reasonable display of variables that are "lists" and not simple atomic vectors
 (which is a typical assumption when starting out learning `R`).
+
+Note that `select` and `reshape` use `select_with` and `reshape_with`,
+respectively, for replacements to `_all`, `_at`, and `_if` functions. The other
+functions (`arrange`, `group_by`, `mutate`, `transmute`, `filter`, and
+`summarize`) use `across`. For moving columns around, there's a new function,
+`relocate`, with similar properties.

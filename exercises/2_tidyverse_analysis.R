@@ -2,7 +2,7 @@
 # Tidyverse Analysis                    #
 #                                       #
 # Korn Ferry Institute: Automation Team #
-# 2020-04-24                            #
+# 2021-04-15                            #
 #########################################
 
 # 1. Required Packages =========================================================
@@ -290,7 +290,7 @@ tidy_comb_wide %>%
 
 # this gets unbelievably complicated
 
-# `dplyr`` has versions of `summarize` that work systematically on subsets of
+# `dplyr`` had versions of `summarize` that work systematically on subsets of
 # the data without you having to specify those subsets directly.
 #  - `all` (do this thing on all of the columns)
 #  - `at` (do this thing on the columns specified)
@@ -307,4 +307,13 @@ tidy_comb_wide %>%
 # note: that what is in "vars" is similar to how we selected columns for spread or
 # pivot_wider
 
-# additional examples are in a separate file!
+# these functions have been obsoleted in favor of a helper function "across" that
+# can do the same thing across a set of columns and but inserted into the 
+# standard summarize/group_by/mutate/transmute/etc. functions
+tidy_comb_wide %>%
+   group_by(data_level) %>%
+   summarize(across(.cols = matches("^X[0-9]+$"),
+                    .fns  = list(mean = mean,
+                                 sd   = sd)))
+
+# select/rename have select_with and rename_with instead of across
