@@ -15,7 +15,7 @@ options(repos = "https://cran.rstudio.com/")
 # 2. Loading Data ==============================================================
 
 # get project directory (SPECIFY MANUALLY???)
-proj_dir    <- "/Users/nydicks/OneDrive - Korn Ferry/Documents/Projects/Workshops and Training/Workshops/2020/siop-2020-big-data-systems"
+proj_dir    <- "~/Desktop/Projects/Active/SIOP_2020/siop-2020-big-data-systems"
 data_dir    <- file.path(proj_dir, "data")
 
 # read in data
@@ -44,7 +44,7 @@ baser_comb_1 <- read.csv(file             = file.path(data_dir, "data_to_rowbind
 # take a look at the data
 head(baser_demos)
 head(baser_scores)
-head(baser_comb)
+head(baser_comb_1)
 
 # if we didn't know to specify `row.names` above, this variable (a hold-over that
 # shows row position of the original data) would be read in as a separate column
