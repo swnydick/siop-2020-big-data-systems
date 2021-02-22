@@ -94,8 +94,8 @@ dt_scores_1 <- data.table::copy(dt_scores)[ , row_n := 1:.N][-c(2,4), ..col_orde
 dt_demos_1[ , 1:3]
 dt_scores_1[ , 1:3]
 
-print(tidy_demos_1)
-print(tidy_scores_1)
+print(dt_demos_1)
+print(dt_scores_1)
 
 # we can do joins in data.table by using base R merging language and using a
 # something that is ... a little terse (like take a subset of data?)
