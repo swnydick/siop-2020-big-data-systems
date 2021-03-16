@@ -1,7 +1,7 @@
 ---
 title: "System Benchmarking"
 author: "Korn Ferry Institute: Automation Team"
-date: 2021-04-15
+date: "Last ran on `r format(Sys.time(), '%d %B, %Y')`"
 output:
   html_document:
     df_print: paged
@@ -144,13 +144,15 @@ bnch_read_small
 Benchmarks for large files:
 
 ```{r}
-large_file      <- file.path(data_dir, "master_data_20200110.csv")
+large_file      <- file.path(data_dir, "master_data_20210315.csv")
 bnch_read_large <- run_benchmark(
   read.csv(large_file, header = TRUE),
   read_csv(large_file),
   fread(large_file),
   vroom::vroom(large_file)
 )
+
+bnch_read_large
 ```
 
 Let's read in the small set of data and the large set of data and divide it

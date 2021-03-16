@@ -4,7 +4,7 @@ options(stringsAsFactors = FALSE)
 
 library(MASS)
 
-N <- 1000000
+N <- 100000
 p <- 10
 
 num_cor <- p * (p-1) / 2
@@ -52,18 +52,18 @@ for(i in seq_len(N)) guid[i] <- paste(sample(c(LETTERS, letters, 1:9), 10), coll
 
 master_data <- data.frame(guid, data_level, data_industry, data_function, data_numeric)
 
-# write.csv(master_data, '~/Desktop/Master_Data_20200110.csv')
+write.csv(master_data, '~/Desktop/Master_Data_20210315.csv')
 
 ##
 rbind_1 <- master_data[1:250, ]
-write.csv(rbind_1, '~/Desktop/Data_to_rowbind.csv')
+write.csv(rbind_1, '~/Desktop/data_to_rowbind.csv')
 
 
 demos <- master_data[23456:24000, 1:4]
 scors <- master_data[23456:24000, c(1, 5:ncol(master_data))]
 
-write.csv(demos, '~/Desktop/Demos_to_merge.csv')
-write.csv(scors, '~/Desktop/Scores_to_merge.csv')
+write.csv(demos, '~/Desktop/demos_to_merge.csv')
+write.csv(scors, '~/Desktop/scores_to_merge.csv')
 
 
 
