@@ -25,6 +25,8 @@ require(kableExtra)
              src="https://www.rstudio.com/wp-content/uploads/2016/09/RStudio-Logo-Blue-Gray-250.png"
              height="30px;" />
     - https://www.rstudio.com/products/rstudio/download/
+3. Materials 
+    - https://bit.ly/32ag86B
 
 ## Package Installation
 

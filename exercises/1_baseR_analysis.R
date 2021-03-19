@@ -15,7 +15,7 @@ options(repos = "https://cran.rstudio.com/")
 # 2. Loading Data ==============================================================
 
 # get project directory (SPECIFY MANUALLY???)
-proj_dir    <- "~/Desktop/Projects/Active/SIOP_2020/siop-2020-big-data-systems"
+proj_dir    <- here::here()
 data_dir    <- file.path(proj_dir, "data")
 
 # read in data
